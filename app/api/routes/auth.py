@@ -16,6 +16,21 @@ def get_db():
     finally:
         db.close()
 
+@router.post("/unlock-user", summary="Unlock user account", description="Manually unlock a user account after lockout. Requires username.")
+def unlock_user(
+    username: str,
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user)
+):
+    try:
+        auth_service.unlock_user(db, username)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    return {"message": f"User '{username}' unlocked successfully."}
+
 
 
 

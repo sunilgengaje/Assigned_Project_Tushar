@@ -1,4 +1,6 @@
+
 from app.repositories.user_repository import UserRepository
+from datetime import datetime, timedelta, time
 from app.core.security import hash_password, verify_password, create_access_token
 from app.models.user import User
 
@@ -30,15 +32,50 @@ class AuthService:
         )
         return self.repo.create(db, user)
 
+    from datetime import datetime, timedelta, time
     def login(self, db, username, password):
         user = self.repo.get_by_username(db, username)
+        now = datetime.utcnow()
+        # Enforce lockout strictly: if locked, always block login
+        if user and user.lockout_until:
+            lockout_time = None
+            try:
+                lockout_time = datetime.fromisoformat(user.lockout_until)
+            except Exception:
+                # If lockout_until is invalid, treat as locked
+                raise Exception(f"Account locked until {user.lockout_until}")
+            if now < lockout_time:
+                raise Exception(f"Account locked until {user.lockout_until}")
         if not user or not verify_password(password, user.password):
+            # Track failed attempts
+            if user:
+                user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+                if user.failed_login_attempts >= 3:
+                    # Lock until next midnight UTC
+                    tomorrow = now.date() + timedelta(days=1)
+                    midnight = datetime.combine(tomorrow, time(0, 0))
+                    user.lockout_until = midnight.isoformat()
+                    db.commit()
+                    raise Exception(f"Account locked due to 3 failed attempts. Try after {user.lockout_until}")
+                db.commit()
             raise Exception("Invalid credentials")
+        # Reset failed attempts on success
+        user.failed_login_attempts = 0
+        user.lockout_until = None
         if user.is_logged_in == 'Y':
             raise Exception("User is already logged in from another session.")
         user.is_logged_in = 'Y'
         db.commit()
         return create_access_token({"sub": user.username})
+
+    def unlock_user(self, db, username):
+        user = self.repo.get_by_username(db, username)
+        if not user:
+            raise Exception("User not found")
+        user.failed_login_attempts = 0
+        user.lockout_until = None
+        db.commit()
+        return True
 
     def reset_password(self, db, username, email, old_password, new_password):
         import json

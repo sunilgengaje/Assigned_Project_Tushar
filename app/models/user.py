@@ -14,3 +14,5 @@ class User(Base):
     password = Column(String(255), nullable=False)
     is_logged_in = Column(String(1), default='N', nullable=False)
     password_history = Column(Text, default='[]', nullable=False)  # JSON-encoded list of last 3 hashes
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    lockout_until = Column(String(25), nullable=True)  # ISO datetime string, nullable
