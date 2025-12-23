@@ -31,9 +31,11 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 def create_access_token(data: dict):
+    import uuid
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
+    to_encode["jti"] = str(uuid.uuid4())  # Add unique JWT ID for every token
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 

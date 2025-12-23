@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run FastAPI backend (main.py) as service",
+			"type": "shell",
+			"command": "uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
+			"isBackground": true,
+			"group": "build"
+		}
+	]
+}
