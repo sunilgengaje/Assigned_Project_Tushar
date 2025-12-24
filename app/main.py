@@ -1,7 +1,6 @@
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import auth, secure
+from app.api.routes import auth, secure, manage_aggregator
 from app.db.base import Base
 from app.db.session import engine
 
@@ -23,3 +22,4 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(secure.router)
+app.include_router(manage_aggregator.router)

@@ -30,7 +30,7 @@ from captcha.image import ImageCaptcha
 )
 def get_captcha():
     import random, string
-    captcha_text = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+    captcha_text = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
     captcha_id = str(uuid.uuid4())
     captcha_store.set(captcha_id, captcha_text)
     image = ImageCaptcha(width=200, height=70)
@@ -189,7 +189,11 @@ def login(user: UserLoginWithCaptcha, db: Session = Depends(get_db)):
     captcha_store.delete(captcha_id)
     # Proceed with login
     try:
-        token = auth_service.login(db, username, password)
+        login_result = auth_service.login(db, username, password)
+        if isinstance(login_result, dict) and login_result.get("already_logged_in"):
+            # User is already logged in, return JSON message
+            return {"message": login_result["message"], "already_logged_in": True}
+        token = login_result
         # Save plain token in .env as AES_GCM_KEY (for AES key usage)
         env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../.env')
         print(f"[SERVER] Writing AES_GCM_KEY to: {env_path} with token: {token}")

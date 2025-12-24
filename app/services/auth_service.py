@@ -34,6 +34,7 @@ class AuthService:
 
     from datetime import datetime, timedelta, time
     def login(self, db, username, password):
+        import base64
         user = self.repo.get_by_username(db, username)
         now = datetime.utcnow()
         # Enforce lockout strictly: if locked, always block login
@@ -46,7 +47,26 @@ class AuthService:
                 raise Exception(f"Account locked until {user.lockout_until}")
             if now < lockout_time:
                 raise Exception(f"Account locked until {user.lockout_until}")
-        if not user or not verify_password(password, user.password):
+        # Decode stored password from base64 if needed
+        stored_password_b64 = user.password if user else None
+        try:
+            stored_password = base64.b64decode(stored_password_b64).decode() if stored_password_b64 else None
+        except Exception:
+            stored_password = stored_password_b64
+        print("\n================ LOGIN DEBUG ================")
+        print("[DEBUG][Login] Input password:", repr(password))
+        print("[DEBUG][Login] Decoded stored password:", repr(stored_password))
+        if user:
+            try:
+                verify_result = verify_password(password, stored_password)
+            except Exception as e:
+                print("[DEBUG][Login] verify_password raised exception:", e)
+                verify_result = False
+            print("[DEBUG][Login] verify_password result:", verify_result)
+        else:
+            verify_result = False
+        print("============================================\n")
+        if not user or not verify_result:
             # Track failed attempts
             if user:
                 user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
@@ -63,7 +83,8 @@ class AuthService:
         user.failed_login_attempts = 0
         user.lockout_until = None
         if user.is_logged_in == 'Y':
-            raise Exception("User is already logged in from another session.")
+            # Instead of raising a generic exception, return a special value
+            return {"already_logged_in": True, "message": "User is already logged in from another session."}
         user.is_logged_in = 'Y'
         db.commit()
         return create_access_token({"sub": user.username})
@@ -79,6 +100,7 @@ class AuthService:
 
     def reset_password(self, db, username, email, old_password, new_password):
         import json
+        import base64
         user = None
         if username:
             user = self.repo.get_by_username(db, username)
@@ -86,7 +108,12 @@ class AuthService:
             user = self.repo.get_by_email(db, email)
         if not user:
             raise Exception("User not found")
-        if not verify_password(old_password, user.password):
+        # Decode stored password from base64 before verification
+        try:
+            stored_password = base64.b64decode(user.password).decode() if user.password else None
+        except Exception:
+            stored_password = user.password
+        if not verify_password(old_password, stored_password):
             raise Exception("Old password is incorrect")
         # Check password history (last 3)
         try:
@@ -103,6 +130,7 @@ class AuthService:
         history.append(new_hashed)
         if len(history) > 3:
             history = history[-3:]
-        user.password = new_hashed
+        # Store new password as base64-encoded hash
+        user.password = base64.b64encode(new_hashed.encode()).decode()
         user.password_history = json.dumps(history)
         db.commit()
