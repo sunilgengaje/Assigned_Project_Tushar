@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 payload = {
     "aggregatorName": "Acme Aggregator",
     "contactPersonName": "John Doe",
-    "email": "b1@example.com",
+    "email": "b26@example.com",
     "mobileNo": "9876543210",
     "location": "Mumbai",
     "services": "Logistics, Warehousing",
