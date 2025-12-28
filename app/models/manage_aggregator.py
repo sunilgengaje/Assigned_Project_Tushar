@@ -20,3 +20,4 @@ class ManageAggregator(Base):
     password_history = Column(String(1024), default='[]', nullable=False)  # JSON-encoded list
     failed_login_attempts = Column(Integer, default=0, nullable=False)
     lockout_until = Column(String(25), nullable=True)  # ISO datetime string, nullable
+

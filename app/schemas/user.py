@@ -25,7 +25,7 @@ class PasswordReset(BaseModel):
     confirm_new_password: str = Field(..., description="Confirm new password (must match new_password)")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "username": "user1",
                 "email": None,
