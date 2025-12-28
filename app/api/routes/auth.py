@@ -1,20 +1,36 @@
-
-# --- Unified imports and logger setup ---
-import os
-import json
 import base64
+
+# --- All imports at top, deduplicated ---
+import base64
+import json
+import hashlib
+import os
 import string
 import secrets
 from datetime import datetime
-from fastapi import APIRouter, Request, Depends, status
-from fastapi.responses import JSONResponse
+import uuid
+from io import BytesIO
+from fastapi import Request, APIRouter, Depends, status, Body
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from dotenv import load_dotenv
+from pydantic import BaseModel
+from captcha.image import ImageCaptcha
 from app.models.manage_aggregator import ManageAggregator
 from app.models.manage_aggregator_backup import ManageAggregatorBackup
-from app.core.security import hash_password
+from app.models import ProjectionDetailsInDB
 from app.db.session import SessionLocal
 from app.api_logger import APILogger
+from app.services.api_log_service import log_api_entry
+from app.core.security import hash_password
+from app.schemas.user import PasswordReset
+from app.services.auth_service import AuthService
+from app.api.deps import get_current_user
+from app.core.captcha_store import captcha_store
+from app.core.aes_key_store import aes_key_store
+from app.core.security import decode_token
+from app.middleware.aes_gcm_middleware import encrypt_json_once
 logger = APILogger()
 
 router = APIRouter()
@@ -26,127 +42,16 @@ def get_db():
     finally:
         db.close()
 
-def generate_random_password(length=12):
-    chars = string.ascii_letters + string.digits
-    return ''.join(secrets.choice(chars) for _ in range(length))
-
-# --- Helper functions for AES key normalization, encrypted response, and error ---
-def normalize_aes_key(aes_key_raw):
-    key_bytes = aes_key_raw.encode()
-    if len(key_bytes) < 32:
-        key_bytes = key_bytes.ljust(32, b'0')
-    elif len(key_bytes) > 32:
-        key_bytes = key_bytes[:32]
-    return key_bytes
-
-def encrypted_response(obj, key_bytes, status_code=200):
-    nonce = os.urandom(12)
-    plaintext = json.dumps(obj, separators=(",", ":")).encode("utf-8")
-    ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
-    encrypted = {"data": base64.b64encode(nonce + ciphertext).decode()}
-    logger.log_decrypted_response(obj, endpoint="encrypted_response")
-    logger.log_encrypted_response(encrypted, endpoint="encrypted_response")
-    return JSONResponse(content=encrypted, status_code=status_code)
-
-def generic_error(message, code, key_bytes, status_code=400, details=None):
-    err = {
-        "status": "error",
-        "error_code": code,
-        "message": message,
-        "details": details or {}
-    }
-    return encrypted_response(err, key_bytes, status_code)
-
-
-@router.delete('/api/manage-aggregator/{aggregator_id}', status_code=status.HTTP_200_OK)
-async def delete_manageAggregator(aggregator_id: int, db: Session = Depends(get_db)):
-    """
-    Delete an aggregator by ID, mirror the deletion in the backup table, and return an encrypted response.
-    All errors and success responses are encrypted using AES-GCM.
-    """
-    from app.services.api_log_service import log_api_entry
-    aes_key_raw = os.getenv("AES_GCM_KEY")
-    client_ip = None
-    username = None
-    if not aes_key_raw:
-        log_api_entry(db, username, client_ip, f"/api/manage-aggregator/{aggregator_id}", "", None, 'F')
-        return generic_error(
-            "AES_GCM_KEY missing",
-            "KEY_MISSING",
-            b"",  # No key to encrypt, so send as plaintext
-            500
-        )
-
-    key_bytes = normalize_aes_key(aes_key_raw)
-
-    agg = db.query(ManageAggregator).filter(ManageAggregator.aggregatorId == aggregator_id).first()
-    if not agg:
-        log_api_entry(db, username, client_ip, f"/api/manage-aggregator/{aggregator_id}", "", key_bytes, 'F')
-        return generic_error("Aggregator not found", "NOT_FOUND", key_bytes, 404)
-
-    try:
-        # Mirror to backup before deletion
-        backup = ManageAggregatorBackup(
-            aggregatorId=agg.aggregatorId,
-            aggregatorName=agg.aggregatorName,
-            contactPersonName=agg.contactPersonName,
-            email=agg.email,
-            mobileNo=agg.mobileNo,
-            location=agg.location,
-            services=agg.services,
-            isDeleted=agg.isDeleted,
-            status=agg.status,
-            password=agg.password,
-            is_logged_in=agg.is_logged_in,
-            password_history=agg.password_history,
-            failed_login_attempts=agg.failed_login_attempts,
-            lockout_until=agg.lockout_until,
-            backup_timestamp=datetime.utcnow().isoformat()
-        )
-        db.add(backup)
-        db.delete(agg)
-        db.commit()
-        log_api_entry(db, username, client_ip, f"/api/manage-aggregator/{aggregator_id}", "", key_bytes, 'S')
-        return encrypted_response(
-            {"message": "Aggregator deleted successfully", "status": "deleted"},
-            key_bytes,
-            200
-        )
-    except Exception as e:
-        db.rollback()
-        log_api_entry(db, username, client_ip, f"/api/manage-aggregator/{aggregator_id}", "", key_bytes, 'F')
-        return generic_error(
-            "Failed to delete aggregator",
-            "DELETE_FAILED",
-            key_bytes,
-            500,
-            {"error": str(e)}
-        )
-
 @router.get("/api/applications/{applicationId}/aggregators/{aggregatorId}/projections", tags=["Projections"])
-def get_encrypted_projection_details(applicationId: int, aggregatorId: int, db: Session = Depends(get_db)):
-    import os
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    import base64, json
-    # Load AES key from .env
-    from dotenv import load_dotenv
-    load_dotenv(dotenv_path=".env")
-    from app.services.api_log_service import log_api_entry
-    aes_key_raw = os.getenv("AES_GCM_KEY")
+def get_encrypted_projection_details(applicationId: int, aggregatorId: int, request: Request, db: Session = Depends(get_db)):
+    # Extract access token from Authorization header
+    auth_header = request.headers.get("authorization")
     client_ip = None
     username = None
-    if not aes_key_raw:
-        log_api_entry(db, username, client_ip, f"/api/applications/{applicationId}/aggregators/{aggregatorId}/projections", "", None, 'F')
-        err = {"status": "error", "error_code": "MISSING_KEY", "message": "AES_GCM_KEY not set in .env", "details": {}}
-        print("[SERVER] Decrypted error:", err)
-        return {"error": base64.b64encode(json.dumps(err).encode()).decode()}
-    # Normalize key to 32 bytes
-    key_bytes = aes_key_raw.encode()
-    if len(key_bytes) < 32:
-        key_bytes = key_bytes.ljust(32, b'0')
-    elif len(key_bytes) > 32:
-        key_bytes = key_bytes[:32]
-    # Query projections
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing or invalid Authorization header"}, status_code=401)
+    access_token = auth_header.split(" ", 1)[1]
+    key_bytes = hashlib.sha256(access_token.encode()).digest()
     projections = db.query(ProjectionDetailsInDB).filter(
         ProjectionDetailsInDB.isDeleted == False,
         ProjectionDetailsInDB.applicationId == applicationId,
@@ -164,7 +69,7 @@ def get_encrypted_projection_details(applicationId: int, aggregatorId: int, db: 
     encrypted_response = {"data": base64.b64encode(nonce + ciphertext).decode()}
     logger.log_encrypted_response(encrypted_response, endpoint="get_encrypted_projection_details")
     return JSONResponse(content=encrypted_response)
-from app.models.manage_aggregator import ManageAggregator
+
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal

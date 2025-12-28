@@ -1,18 +1,17 @@
 from fastapi import FastAPI
-
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import auth, secure, manage_aggregator
 from app.db.base import Base
 from app.db.session import engine
 import os
 from dotenv import load_dotenv
+from app.middleware.aes_gcm_middleware import AESGCMMiddleware
 
 load_dotenv(dotenv_path=".env")
 API_ENV = os.getenv("API_ENV", "DEV").upper()
 
 Base.metadata.create_all(bind=engine)
 
-from app.middleware.aes_gcm_middleware import AESGCMMiddleware
 app = FastAPI(title="FastAPI Clean Auth")
 app.add_middleware(AESGCMMiddleware, secure_prefix="/secure")
 
