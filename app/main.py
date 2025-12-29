@@ -12,7 +12,28 @@ API_ENV = os.getenv("API_ENV", "DEV").upper()
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="FastAPI Clean Auth")
+
+# Global dependency: require authentication for all routes except login, register, captcha
+from fastapi import Depends
+from app.api.deps import get_current_user
+
+from fastapi import Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+EXEMPT_PATHS = ["/api/login", "/api/register", "/api/captcha"]
+
+def global_auth_dependency(request: Request, credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))):
+	for prefix in EXEMPT_PATHS:
+		if request.url.path.startswith(prefix):
+			return None
+	# If not exempt, require authentication
+	if not credentials or not credentials.credentials:
+		from fastapi import HTTPException, status
+		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
+	from app.api.deps import get_current_user
+	return get_current_user(credentials)
+
+app = FastAPI(title="FastAPI Clean Auth", dependencies=[Depends(global_auth_dependency)])
 app.add_middleware(AESGCMMiddleware, secure_prefix="/secure")
 
 # Dynamic CORS origins for DEV/UAT

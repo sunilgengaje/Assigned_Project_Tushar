@@ -17,7 +17,7 @@ from app.db.session import SessionLocal  # Ensure SessionLocal is imported
 from app.api_logger import APILogger
 logger = APILogger()
 
-router = APIRouter()
+router = APIRouter(prefix="/api")
 
 def get_db():
     db = SessionLocal()
@@ -59,7 +59,7 @@ def generic_error(message, code, key_bytes, status_code=400, details=None):
 
 
 
-@router.post('/api/manage-aggregator', status_code=status.HTTP_201_CREATED)
+@router.post('/manage-aggregator', status_code=status.HTTP_201_CREATED)
 async def create_manageAggregator(request: Request, db: Session = Depends(get_db)):
     agg_dict = None  # Ensure agg_dict is always defined
     key_bytes = None
@@ -85,7 +85,7 @@ async def create_manageAggregator(request: Request, db: Session = Depends(get_db
         print("[DEBUG] agg_dict:", agg_dict, file=sys.stderr)
         password = generate_random_password()
         hashed_password = hash_password(password)
-        password_b64 = base64.b64encode(hashed_password.encode()).decode()
+        # Store the raw bcrypt hash in the password field (not base64-encoded)
         new_agg = ManageAggregator(
             aggregatorName=agg_dict["aggregatorName"],
             contactPersonName=agg_dict["contactPersonName"],
@@ -94,7 +94,7 @@ async def create_manageAggregator(request: Request, db: Session = Depends(get_db
             location=agg_dict["location"],
             services=agg_dict["services"],
             status="Created",
-            password=password_b64,
+            password=hashed_password,
             is_logged_in='N',
             password_history=json.dumps([hashed_password]),
             failed_login_attempts=0

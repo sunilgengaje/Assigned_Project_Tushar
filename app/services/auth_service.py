@@ -39,7 +39,6 @@ class AuthService:
         return {"user": user}
 
     def login(self, db, username, password):
-        import base64
         from datetime import datetime, timedelta, time
         user = db.query(ManageAggregator).filter(ManageAggregator.email == username).first()
         now = datetime.utcnow()
@@ -51,11 +50,7 @@ class AuthService:
                 return {"error": f"Account locked until {user.lockout_until}", "error_code": "ACCOUNT_LOCKED"}
             if now < lockout_time:
                 return {"error": f"Account locked until {user.lockout_until}", "error_code": "ACCOUNT_LOCKED"}
-        stored_password_b64 = user.password if user else None
-        try:
-            stored_password = base64.b64decode(stored_password_b64).decode() if stored_password_b64 else None
-        except Exception:
-            stored_password = stored_password_b64
+        stored_password = user.password if user else None
         if user:
             try:
                 verify_result = verify_password(password, stored_password)
@@ -93,7 +88,6 @@ class AuthService:
 
     def reset_password(self, db, username, email, old_password, new_password):
         import json
-        import base64
         user = None
         if username:
             user = db.query(ManageAggregator).filter(ManageAggregator.email == username).first()
@@ -101,10 +95,7 @@ class AuthService:
             user = db.query(ManageAggregator).filter(ManageAggregator.email == email).first()
         if not user:
             return {"error": "User not found", "error_code": "USER_NOT_FOUND"}
-        try:
-            stored_password = base64.b64decode(user.password).decode() if user.password else None
-        except Exception:
-            stored_password = user.password
+        stored_password = user.password if user.password else None
         if not verify_password(old_password, stored_password):
             return {"error": "Old password is incorrect", "error_code": "INCORRECT_OLD_PASSWORD"}
         try:
@@ -119,7 +110,7 @@ class AuthService:
         history.append(new_hashed)
         if len(history) > 3:
             history = history[-3:]
-        user.password = base64.b64encode(new_hashed.encode()).decode()
+        user.password = new_hashed
         user.password_history = json.dumps(history)
         db.commit()
         return {"success": True}

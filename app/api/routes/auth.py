@@ -2,18 +2,29 @@
 
 
 
+
+# ====================
+# Standard Library Imports
+# ====================
 import os
 import uuid
 import json
 import base64
 import hashlib
 from io import BytesIO
+
+# ====================
+# Third-Party Imports
+# ====================
 from fastapi import APIRouter, Depends, Request, status, Body, FastAPI
 from fastapi.responses import JSONResponse
-from sqlalchemy import and_
 from sqlalchemy.orm import Session
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from captcha.image import ImageCaptcha
+
+# ====================
+# Local App Imports
+# ====================
 from app.api_logger import APILogger
 from app.db.session import SessionLocal
 from app.api.deps import get_current_user
@@ -26,12 +37,14 @@ from app.models.payment_aggregator import PaymentAggregatorInDB
 from app.schemas.payment_aggregator_update import PaymentAggregatorUpdate
 from app.schemas.user import PasswordReset
 
+
 logger = APILogger()
-router = APIRouter()
+router = APIRouter(prefix="/api")
 auth_service = AuthService()
 
-
-
+# ====================
+# Utility Functions
+# ====================
 def get_db():
     db = SessionLocal()
     try:
@@ -40,8 +53,15 @@ def get_db():
         db.close()
 
 
-# New endpoint: Get payment aggregator by applicationId and aggregatorId
-@router.get("/api/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}", tags=["PaymentAggregator"])
+
+
+
+
+# ====================
+# Payment Aggregator Endpoints
+# ====================
+
+@router.get("/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}", tags=["PaymentAggregator"])
 def get_payment_aggregator_by_ids(
     applicationId: int,
     aggregatorId: int,
@@ -94,8 +114,7 @@ def create_tables():
 
 
 
-# PUT endpoint to update PaymentAggregator with per-user AES encryption
-@router.put('/api/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}', tags=["PaymentAggregator"])
+@router.put('/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}', tags=["PaymentAggregator"])
 async def update_paymentAggregator(
     applicationId: int,
     aggregatorId: int,
@@ -205,47 +224,12 @@ async def update_paymentAggregator(
     return JSONResponse(content=encrypted_response, status_code=201)
 
 
-# New endpoint: Get payment aggregator by applicationId and aggregatorId
-@router.get("/api/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}", tags=["PaymentAggregator"])
-def get_payment_aggregator_by_ids(
-    applicationId: int,
-    aggregatorId: int,
-    request: Request,
-    db: Session = Depends(get_db)
-):
-    """
-    Fetch a single payment aggregator by applicationId and aggregatorId, encrypted with per-user AES key derived from access token.
-    """
-    auth_header = request.headers.get("authorization")
-    client_ip = None
-    username = None
-    if not auth_header or not auth_header.lower().startswith("bearer "):
-        return JSONResponse({"error": "Missing or invalid Authorization header"}, status_code=401)
-    access_token = auth_header.split(" ", 1)[1]
-    key_bytes = hashlib.sha256(access_token.encode()).digest()
 
-    aggregator = db.query(PaymentAggregatorInDB).filter(
-        ~PaymentAggregatorInDB.isDeleted,
-        PaymentAggregatorInDB.applicationId == applicationId,
-        PaymentAggregatorInDB.aggregatorId == aggregatorId
-    ).first()
-    if not aggregator:
-        err = {"status": "error", "error_code": "NOT_FOUND", "message": "PaymentAggregator not found", "details": {}}
-        logger.log_decrypted_response(err, endpoint="get_payment_aggregator_by_ids")
-        log_api_entry(db, username, client_ip, f"/api/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}", str(err), key_bytes, 'F')
-        return JSONResponse({"error": base64.b64encode(json.dumps(err).encode()).decode()}, status_code=404)
 
-    data = {c.name: getattr(aggregator, c.name, None) for c in PaymentAggregatorInDB.__table__.columns}
-    logger.log_decrypted_response(data, endpoint="get_payment_aggregator_by_ids")
-    log_api_entry(db, username, client_ip, f"/api/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}", str(data), key_bytes, 'S')
-    nonce = os.urandom(12)
-    plaintext = json.dumps(data, separators=(',', ':')).encode("utf-8")
-    ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
-    encrypted_response = {"data": base64.b64encode(nonce + ciphertext).decode()}
-    logger.log_encrypted_response(encrypted_response, endpoint="get_payment_aggregator_by_ids")
-    return JSONResponse(content=encrypted_response)
 
-# App startup logic
+# ====================
+# App Startup Logic
+# ====================
 app = None
 try:
     import app.main
@@ -262,7 +246,7 @@ else:
 
 
 
-@router.get("/api/all-payment-aggregator/{aggregatorId}", tags=["PaymentAggregator"])
+@router.get("/all-payment-aggregator/{aggregatorId}", tags=["PaymentAggregator"])
 def get_all_payment_aggregator_by_aggregatorId(aggregatorId: int, request: Request, db: Session = Depends(get_db)):
     """
     Returns all payment aggregators for a given aggregatorId, encrypted with per-user AES key derived from access token.
@@ -319,7 +303,7 @@ def get_all_payment_aggregator_by_aggregatorId(aggregatorId: int, request: Reque
 # get_db already defined above, remove duplicate
 
 
-@router.get("/api/applications/{applicationId}/aggregators/{aggregatorId}/projections", tags=["Projections"])
+@router.get("/applications/{applicationId}/aggregators/{aggregatorId}/projections", tags=["Projections"])
 def get_encrypted_projection_details(applicationId: int, aggregatorId: int, request: Request, db: Session = Depends(get_db)):
     # Extract access token from Authorization header
     auth_header = request.headers.get("authorization")
@@ -348,7 +332,7 @@ def get_encrypted_projection_details(applicationId: int, aggregatorId: int, requ
     return JSONResponse(content=encrypted_response)
 
 
-@router.post("/api/applications/{applicationId}/aggregators/{aggregatorId}/projections", tags=["Projections"], status_code=status.HTTP_201_CREATED)
+@router.post("/applications/{applicationId}/aggregators/{aggregatorId}/projections", tags=["Projections"], status_code=status.HTTP_201_CREATED)
 def create_encrypted_projection_details(applicationId: int, aggregatorId: int, projectionDetails: list, request: Request, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     # Extract access token from Authorization header
     auth_header = request.headers.get("authorization")
@@ -397,7 +381,7 @@ def create_encrypted_projection_details(applicationId: int, aggregatorId: int, p
 
 
 
-@router.post("/api/applications/payment-aggregators", tags=["PaymentAggregator"], status_code=status.HTTP_201_CREATED)
+@router.post("/applications/payment-aggregators", tags=["PaymentAggregator"], status_code=status.HTTP_201_CREATED)
 async def create_payment_aggregator(
     request: Request,
     db: Session = Depends(get_db),
@@ -407,11 +391,14 @@ async def create_payment_aggregator(
     Bulk create payment aggregators. Request and response are encrypted with per-user AES key derived from access token.
     """
     auth_header = request.headers.get("authorization")
+    print("[DEBUG] Incoming Authorization header:", auth_header)
     client_ip = request.client.host if request and request.client else None
     username = current_user if current_user else None
     if not auth_header or not auth_header.lower().startswith("bearer "):
+        print("[DEBUG] Missing or invalid Authorization header!")
         return JSONResponse({"error": "Missing or invalid Authorization header"}, status_code=401)
     access_token = auth_header.split(" ", 1)[1]
+    print("[DEBUG] Extracted access token:", access_token)
     key_bytes = hashlib.sha256(access_token.encode()).digest()
 
     try:
@@ -430,6 +417,13 @@ async def create_payment_aggregator(
         aggregator_list = json.loads(plaintext.decode("utf-8"))
         if not isinstance(aggregator_list, list):
             aggregator_list = [aggregator_list]
+        # Coerce string booleans to real booleans for isDeleted
+        for agg in aggregator_list:
+            if "isDeleted" in agg:
+                if agg["isDeleted"] == "false":
+                    agg["isDeleted"] = False
+                elif agg["isDeleted"] == "true":
+                    agg["isDeleted"] = True
     except Exception as e:
         err = {"status": "error", "error_code": "DECRYPTION_FAILED", "message": f"Decryption failed: {e}", "details": {}}
         logger.log_decrypted_response(err, endpoint="create_payment_aggregator")
@@ -712,48 +706,48 @@ def login(data: dict = Body(...), db: Session = Depends(get_db), request: Reques
     # Proceed with login
     try:
         login_result = auth_service.login(db, username, password)
-        if isinstance(login_result, dict) and login_result.get("already_logged_in"):
-            log_api_entry(db, username, client_ip, "/auth/login", str(data), aes_key_bytes, 'F')
-            return generic_login_error(login_result["message"], code="ALREADY_LOGGED_IN", status_code=400)
-        if isinstance(login_result, dict) and "access_token" in login_result:
-            token = login_result["access_token"]
-            # Set AES key in aes_key_store for this user (username/email)
-            from app.core.aes_key_store import aes_key_store
-            key_bytes = token.encode()
-            if len(key_bytes) < 32:
-                key_bytes = key_bytes.ljust(32, b'0')
-            elif len(key_bytes) > 32:
-                key_bytes = key_bytes[:32]
-            aes_key_store.set_key(username, key_bytes)
-            aes_key_bytes = key_bytes
-            # Fetch user details for response
-            user_obj = db.query(ManageAggregator).filter(ManageAggregator.email == username).first()
-            user_data = None
-            if user_obj:
-                user_data = {
-                    "aggregatorId": user_obj.aggregatorId,
-                    "aggregatorName": user_obj.aggregatorName,
-                    "contactPersonName": user_obj.contactPersonName,
-                    "email": user_obj.email
+        # Handle error dicts from auth_service.login
+        if isinstance(login_result, dict):
+            if login_result.get("already_logged_in"):
+                log_api_entry(db, username, client_ip, "/auth/login", str(data), aes_key_bytes, 'F')
+                return generic_login_error(login_result["message"], code="ALREADY_LOGGED_IN", status_code=400)
+            if login_result.get("error"):
+                # Return error as base64-encoded JSON
+                log_api_entry(db, username, client_ip, "/auth/login", str(data), aes_key_bytes, 'F')
+                return generic_login_error(login_result["error"], code=login_result.get("error_code", "LOGIN_ERROR"), status_code=400)
+            if "access_token" in login_result:
+                token = login_result["access_token"]
+                # Set AES key in aes_key_store for this user (username/email)
+                from app.core.aes_key_store import aes_key_store
+                key_bytes = token.encode()
+                if len(key_bytes) < 32:
+                    key_bytes = key_bytes.ljust(32, b'0')
+                elif len(key_bytes) > 32:
+                    key_bytes = key_bytes[:32]
+                aes_key_store.set_key(username, key_bytes)
+                aes_key_bytes = key_bytes
+                # Fetch user details for response
+                user_obj = db.query(ManageAggregator).filter(ManageAggregator.email == username).first()
+                user_data = None
+                if user_obj:
+                    user_data = {
+                        "aggregatorId": user_obj.aggregatorId,
+                        "aggregatorName": user_obj.aggregatorName,
+                        "contactPersonName": user_obj.contactPersonName,
+                        "email": user_obj.email
+                    }
+                response_obj = {
+                    "access_token": token,
+                    "message": "login successfully",
+                    "data": user_data
                 }
-            response_obj = {
-                "access_token": token,
-                "message": "login successfully",
-                "data": user_data
-            }
-            logger.log_decrypted_response(response_obj, endpoint="login")
-            resp_b64 = base64.b64encode(json.dumps(response_obj, separators=(",", ":")).encode()).decode()
-            logger.log_encrypted_response({"data": resp_b64}, endpoint="login")
-            log_api_entry(db, username, client_ip, "/auth/login", str(data), aes_key_bytes, 'S')
-            return {"data": resp_b64}
-        else:
-            token = str(login_result)
-        response_obj = {"access_token": token, "message": "login successfully"}
-        logger.log_decrypted_response(response_obj, endpoint="login")
-        resp_b64 = base64.b64encode(json.dumps(response_obj, separators=(",", ":")).encode()).decode()
-        logger.log_encrypted_response({"data": resp_b64}, endpoint="login")
-        log_api_entry(db, username, client_ip, "/auth/login", str(data), aes_key_bytes, 'S')
-        return {"data": resp_b64}
+                logger.log_decrypted_response(response_obj, endpoint="login")
+                resp_b64 = base64.b64encode(json.dumps(response_obj, separators=(",", ":")).encode()).decode()
+                logger.log_encrypted_response({"data": resp_b64}, endpoint="login")
+                log_api_entry(db, username, client_ip, "/auth/login", str(data), aes_key_bytes, 'S')
+                return {"data": resp_b64}
+        # If login_result is not a dict, treat as error
+        return generic_login_error("Invalid login response", code="LOGIN_ERROR", status_code=400)
     except Exception as e:
         error_obj = {"error": str(e) if str(e) else "Invalid username or password"}
         logger.log_decrypted_response(error_obj, endpoint="login")
@@ -803,4 +797,3 @@ async def reset_password(
     return {"message": "Password reset successful"}
 
 # --- Secure Projections Endpoint (duplicate of secure_projections.py for /auth router) ---
-
