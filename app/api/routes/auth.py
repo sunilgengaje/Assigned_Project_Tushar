@@ -72,12 +72,21 @@ def get_payment_aggregator_by_ids(
     Fetch a single payment aggregator by applicationId and aggregatorId, encrypted with per-user AES key derived from access token.
     """
     auth_header = request.headers.get("authorization")
-    client_ip = None
+    client_ip = request.client.host if request and request.client else None
     username = None
+    jti = None
     if not auth_header or not auth_header.lower().startswith("bearer "):
         return JSONResponse({"error": "Missing or invalid Authorization header"}, status_code=401)
     access_token = auth_header.split(" ", 1)[1]
     key_bytes = hashlib.sha256(access_token.encode()).digest()
+    try:
+        from app.core.security import decode_token
+        payload = decode_token(access_token)
+        jti = payload.get("jti")
+        username = payload.get("sub")
+    except Exception:
+        jti = None
+        username = None
 
     aggregator = db.query(PaymentAggregatorInDB).filter(
         PaymentAggregatorInDB.applicationId == applicationId,
@@ -87,12 +96,12 @@ def get_payment_aggregator_by_ids(
     if not aggregator:
         err = {"status": "error", "error_code": "NOT_FOUND", "message": "PaymentAggregator not found", "details": {}}
         logger.log_decrypted_response(err, endpoint="get_payment_aggregator_by_ids")
-        log_api_entry(db, username, client_ip, f"/api/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}", str(err), key_bytes, 'F')
+        log_api_entry(db, username, client_ip, f"/api/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}", str(err), key_bytes, 'F', session_id=jti)
         return JSONResponse({"error": base64.b64encode(json.dumps(err).encode()).decode()}, status_code=404)
 
     data = {c.name: getattr(aggregator, c.name, None) for c in PaymentAggregatorInDB.__table__.columns}
     logger.log_decrypted_response(data, endpoint="get_payment_aggregator_by_ids")
-    log_api_entry(db, username, client_ip, f"/api/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}", str(data), key_bytes, 'S')
+    log_api_entry(db, username, client_ip, f"/api/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}", str(data), key_bytes, 'S', session_id=jti)
     nonce = os.urandom(12)
     plaintext = json.dumps(data, separators=(',', ':')).encode("utf-8")
     ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
@@ -130,6 +139,13 @@ async def update_paymentAggregator(
         return JSONResponse({"error": "Missing or invalid Authorization header"}, status_code=401)
     access_token = auth_header.split(" ", 1)[1]
     key_bytes = hashlib.sha256(access_token.encode()).digest()
+    jti = None
+    try:
+        from app.core.security import decode_token
+        payload = decode_token(access_token)
+        jti = payload.get("jti")
+    except Exception:
+        jti = None
 
     # Decrypt the payload
     try:
@@ -138,7 +154,7 @@ async def update_paymentAggregator(
         if not data_b64:
             err = {"status": "error", "error_code": "MISSING_DATA", "message": "Missing encrypted data", "details": {}}
             logger.log_decrypted_response(err, endpoint="update_paymentAggregator")
-            log_api_entry(db, username, client_ip, request.url.path, str(encrypted_payload), key_bytes, 'F')
+            log_api_entry(db, username, client_ip, request.url.path, str(encrypted_payload), key_bytes, 'F', session_id=jti)
             return {"error": base64.b64encode(json.dumps(err).encode()).decode()}
         combined = base64.b64decode(data_b64)
         nonce = combined[:12]
@@ -150,7 +166,7 @@ async def update_paymentAggregator(
     except Exception as e:
         err = {"status": "error", "error_code": "DECRYPTION_FAILED", "message": f"Decryption failed: {e}", "details": {}}
         logger.log_decrypted_response(err, endpoint="update_paymentAggregator")
-        log_api_entry(db, username, client_ip, request.url.path, str(e), key_bytes, 'F')
+        log_api_entry(db, username, client_ip, request.url.path, str(e), key_bytes, 'F', session_id=jti)
         return {"error": base64.b64encode(json.dumps(err).encode()).decode()}
 
     # Find and update the PaymentAggregator
@@ -162,7 +178,7 @@ async def update_paymentAggregator(
     if not existing_PaymentAggregator:
         err = {"status": "error", "error_code": "NOT_FOUND", "message": "PaymentAggregator not found", "details": {}}
         logger.log_decrypted_response(err, endpoint="update_paymentAggregator")
-        log_api_entry(db, username, client_ip, request.url.path, str(err), key_bytes, 'F')
+        log_api_entry(db, username, client_ip, request.url.path, str(err), key_bytes, 'F', session_id=jti)
         return JSONResponse({"error": base64.b64encode(json.dumps(err).encode()).decode()}, status_code=404)
 
     # Update the values from update_obj
@@ -178,7 +194,7 @@ async def update_paymentAggregator(
         "status": "Updated"
     }
     logger.log_decrypted_response(response_dict, endpoint="update_paymentAggregator")
-    log_api_entry(db, username, client_ip, request.url.path, str(response_dict), key_bytes, 'S')
+    log_api_entry(db, username, client_ip, request.url.path, str(response_dict), key_bytes, 'S', session_id=jti)
     # Encrypt response
     nonce = os.urandom(12)
     plaintext = json.dumps(response_dict, separators=(",", ":")).encode("utf-8")
@@ -252,12 +268,21 @@ def get_all_payment_aggregator_by_aggregatorId(aggregatorId: int, request: Reque
     Returns all payment aggregators for a given aggregatorId, encrypted with per-user AES key derived from access token.
     """
     auth_header = request.headers.get("authorization")
-    client_ip = None
+    client_ip = request.client.host if request and request.client else None
     username = None
+    jti = None
     if not auth_header or not auth_header.lower().startswith("bearer "):
         return JSONResponse({"error": "Missing or invalid Authorization header"}, status_code=401)
     access_token = auth_header.split(" ", 1)[1]
     key_bytes = hashlib.sha256(access_token.encode()).digest()
+    try:
+        from app.core.security import decode_token
+        payload = decode_token(access_token)
+        jti = payload.get("jti")
+        username = payload.get("sub")
+    except Exception:
+        jti = None
+        username = None
 
     from datetime import datetime, timezone
     payment_aggregators = db.query(PaymentAggregatorInDB).filter(
@@ -291,7 +316,7 @@ def get_all_payment_aggregator_by_aggregatorId(aggregatorId: int, request: Reque
         d = {c.name: getattr(p, c.name, None) for c in PaymentAggregatorInDB.__table__.columns}
         data.append(d)
     logger.log_decrypted_response(data, endpoint="get_all_payment_aggregator_by_aggregatorId")
-    log_api_entry(db, username, client_ip, f"/api/all-payment-aggregator/{aggregatorId}", str(data), key_bytes, 'S')
+    log_api_entry(db, username, client_ip, f"/api/all-payment-aggregator/{aggregatorId}", str(data), key_bytes, 'S', session_id=jti)
     nonce = os.urandom(12)
     plaintext = json.dumps(data, separators=(",", ":")).encode("utf-8")
     ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
@@ -307,12 +332,21 @@ def get_all_payment_aggregator_by_aggregatorId(aggregatorId: int, request: Reque
 def get_encrypted_projection_details(applicationId: int, aggregatorId: int, request: Request, db: Session = Depends(get_db)):
     # Extract access token from Authorization header
     auth_header = request.headers.get("authorization")
-    client_ip = None
+    client_ip = request.client.host if request and request.client else None
     username = None
     if not auth_header or not auth_header.lower().startswith("bearer "):
         return JSONResponse({"error": "Missing or invalid Authorization header"}, status_code=401)
     access_token = auth_header.split(" ", 1)[1]
     key_bytes = hashlib.sha256(access_token.encode()).digest()
+    jti = None
+    try:
+        from app.core.security import decode_token
+        payload = decode_token(access_token)
+        username = payload.get("sub")
+        jti = payload.get("jti")
+    except Exception:
+        username = None
+        jti = None
     projections = db.query(ProjectionDetailsInDB).filter(
         ~ProjectionDetailsInDB.isDeleted,
         ProjectionDetailsInDB.applicationId == applicationId,
@@ -323,7 +357,7 @@ def get_encrypted_projection_details(applicationId: int, aggregatorId: int, requ
         d = {c.name: getattr(p, c.name, None) for c in ProjectionDetailsInDB.__table__.columns}
         projections_data.append(d)
     logger.log_decrypted_response(projections_data, endpoint="get_encrypted_projection_details")
-    log_api_entry(db, username, client_ip, f"/api/applications/{applicationId}/aggregators/{aggregatorId}/projections", str(projections_data), key_bytes, 'S')
+    log_api_entry(db, username, client_ip, f"/api/applications/{applicationId}/aggregators/{aggregatorId}/projections", str(projections_data), key_bytes, 'S', session_id=jti)
     nonce = os.urandom(12)
     plaintext = json.dumps(projections_data, separators=(",", ":")).encode("utf-8")
     ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
@@ -336,12 +370,21 @@ def get_encrypted_projection_details(applicationId: int, aggregatorId: int, requ
 def create_encrypted_projection_details(applicationId: int, aggregatorId: int, projectionDetails: list, request: Request, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     # Extract access token from Authorization header
     auth_header = request.headers.get("authorization")
-    client_ip = None
+    client_ip = request.client.host if request and request.client else None
     username = None
     if not auth_header or not auth_header.lower().startswith("bearer "):
         return JSONResponse({"error": "Missing or invalid Authorization header"}, status_code=401)
     access_token = auth_header.split(" ", 1)[1]
     key_bytes = hashlib.sha256(access_token.encode()).digest()
+    jti = None
+    try:
+        from app.core.security import decode_token
+        payload = decode_token(access_token)
+        username = payload.get("sub")
+        jti = payload.get("jti")
+    except Exception:
+        username = None
+        jti = None
 
     # Mark old projections as deleted
     projectionDetailsOld = db.query(ProjectionDetailsInDB).filter(
@@ -370,7 +413,7 @@ def create_encrypted_projection_details(applicationId: int, aggregatorId: int, p
         d = {c.name: getattr(p, c.name, None) for c in ProjectionDetailsInDB.__table__.columns}
         projections_data.append(d)
     logger.log_decrypted_response(projections_data, endpoint="create_encrypted_projection_details")
-    log_api_entry(db, username, client_ip, f"/api/applications/{applicationId}/aggregators/{aggregatorId}/projections", str(projections_data), key_bytes, 'S')
+    log_api_entry(db, username, client_ip, f"/api/applications/{applicationId}/aggregators/{aggregatorId}/projections", str(projections_data), key_bytes, 'S', session_id=jti)
     nonce = os.urandom(12)
     plaintext = json.dumps(projections_data, separators=(",", ":")).encode("utf-8")
     ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
@@ -400,6 +443,13 @@ async def create_payment_aggregator(
     access_token = auth_header.split(" ", 1)[1]
     print("[DEBUG] Extracted access token:", access_token)
     key_bytes = hashlib.sha256(access_token.encode()).digest()
+    jti = None
+    try:
+        from app.core.security import decode_token
+        payload = decode_token(access_token)
+        jti = payload.get("jti")
+    except Exception:
+        jti = None
 
     try:
         encrypted_payload = await request.json()
@@ -407,7 +457,7 @@ async def create_payment_aggregator(
         if not data_b64:
             err = {"status": "error", "error_code": "MISSING_DATA", "message": "Missing encrypted data", "details": {}}
             logger.log_decrypted_response(err, endpoint="create_payment_aggregator")
-            log_api_entry(db, username, client_ip, "/api/applications/payment-aggregators", str(encrypted_payload), key_bytes, 'F')
+            log_api_entry(db, username, client_ip, "/api/applications/payment-aggregators", str(encrypted_payload), key_bytes, 'F', session_id=jti)
             return {"error": base64.b64encode(json.dumps(err).encode()).decode()}
         combined = base64.b64decode(data_b64)
         nonce = combined[:12]
@@ -427,7 +477,7 @@ async def create_payment_aggregator(
     except Exception as e:
         err = {"status": "error", "error_code": "DECRYPTION_FAILED", "message": f"Decryption failed: {e}", "details": {}}
         logger.log_decrypted_response(err, endpoint="create_payment_aggregator")
-        log_api_entry(db, username, client_ip, "/api/applications/payment-aggregators", str(e), key_bytes, 'F')
+        log_api_entry(db, username, client_ip, "/api/applications/payment-aggregators", str(e), key_bytes, 'F', session_id=jti)
         return {"error": base64.b64encode(json.dumps(err).encode()).decode()}
 
     # Insert new aggregators using PaymentAggregatorInDB
@@ -445,7 +495,7 @@ async def create_payment_aggregator(
             for agg in new_aggregators
         ]
         logger.log_decrypted_response(response_data, endpoint="create_payment_aggregator")
-        log_api_entry(db, username, client_ip, "/api/applications/payment-aggregators", str(response_data), key_bytes, 'S')
+        log_api_entry(db, username, client_ip, "/api/applications/payment-aggregators", str(response_data), key_bytes, 'S', session_id=jti)
         nonce = os.urandom(12)
         plaintext = json.dumps(response_data, separators=(",", ":")).encode("utf-8")
         ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
@@ -456,7 +506,7 @@ async def create_payment_aggregator(
         db.rollback()
         err = {"status": "error", "error_code": "CREATE_ERROR", "message": str(e), "details": {}}
         logger.log_decrypted_response(err, endpoint="create_payment_aggregator")
-        log_api_entry(db, username, client_ip, "/api/applications/payment-aggregators", str(e), key_bytes, 'F')
+        log_api_entry(db, username, client_ip, "/api/applications/payment-aggregators", str(e), key_bytes, 'F', session_id=jti)
         return {"error": base64.b64encode(json.dumps(err).encode()).decode()}
 
 auth_service = AuthService()
@@ -491,6 +541,46 @@ def get_captcha():
     logger.log_request_payload({}, endpoint="get_captcha")
     logger.log_decrypted_response(response, endpoint="get_captcha")
     return response
+
+
+# POST /captcha: Accepts and returns base64-encoded JSON
+from fastapi import Body
+@router.post(
+    "/captcha",
+    summary="Get captcha image and ID (base64, base64-encoded JSON)",
+    tags=["Auth"],
+    response_description="Base64-encoded JSON with base64 image and captcha_id."
+)
+async def get_captcha_base64(data: dict = Body(...)):
+    import random
+    import string
+    import base64
+    from app.api_logger import APILogger
+    logger = APILogger()
+    # Expecting {"data": "<base64-encoded-JSON>"}, but payload is ignored for captcha
+    # Decode for logging, but not used
+    try:
+        if "data" in data:
+            decoded = base64.b64decode(data["data"]).decode()
+            logger.log_request_payload(json.loads(decoded), endpoint="get_captcha_base64")
+        else:
+            logger.log_request_payload({}, endpoint="get_captcha_base64")
+    except Exception:
+        logger.log_request_payload({}, endpoint="get_captcha_base64")
+    captcha_text = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    captcha_id = str(uuid.uuid4())
+    captcha_store.set(captcha_id, captcha_text)
+    image = ImageCaptcha(width=200, height=70)
+    data_img = image.generate(captcha_text)
+    img_bytes = BytesIO(data_img.read())
+    img_b64 = base64.b64encode(img_bytes.getvalue()).decode()
+    response = {"captcha_id": captcha_id, "image_b64": img_b64}
+    logger.log_decrypted_response(response, endpoint="get_captcha_base64")
+    # Encode response as base64-encoded JSON
+    resp_json = json.dumps(response, separators=(",", ":")).encode()
+    resp_b64 = base64.b64encode(resp_json).decode()
+    logger.log_encrypted_response({"data": resp_b64}, endpoint="get_captcha_base64")
+    return {"data": resp_b64}
 
 def get_db():
     db = SessionLocal()
@@ -532,6 +622,9 @@ def unlock_user(
 
 
 
+
+from datetime import datetime, timezone
+
 @router.post(
     "/logout",
     summary="Logout user session (POST)",
@@ -545,34 +638,67 @@ def unlock_user(
     response_description="Logout successful message"
 )
 def logout(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user)
 ):
-    """
-    Logout the current user. Requires a valid Authorization token (Bearer).
-    """
     import base64
     import json
+    import os
+    import hashlib
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     from app.services.api_log_service import log_api_entry
-    client_ip = None
-    aes_key_bytes = None
-    def generic_error(message, code="GENERIC_ERROR", status_code=400, details=None):
+    client_ip = request.client.host if request and request.client else None
+    def encrypt_response(obj, key_bytes):
+        nonce = os.urandom(12)
+        plaintext = json.dumps(obj, separators=(",", ":")).encode("utf-8")
+        # Print the plaintext JSON to the server console before encrypting
+        print("[SERVER] Decrypted logout response:", json.dumps(obj, indent=2))
+        ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
+        encrypted_response = {"data": base64.b64encode(nonce + ciphertext).decode()}
+        print("[SERVER] Encrypted logout response:", json.dumps(encrypted_response, indent=2))
+        return encrypted_response
+
+    # Extract access token from Authorization header
+    auth_header = request.headers.get("authorization")
+    key_bytes = None
+    access_token = None
+    if not auth_header:
         err = {
             "status": "error",
-            "error_code": code,
-            "message": message,
-            "details": details or {}
+            "message": "Authorization header is missing",
+            "errorCode": "AUTH_HEADER_MISSING"
         }
-        err_json = json.dumps(err, separators=(",", ":")).encode()
-        err_b64 = base64.b64encode(err_json).decode()
-        log_api_entry(db, current_user, client_ip, "/logout", str(err), aes_key_bytes, 'F')
-        return {"error": err_b64}
+        print("[SERVER] Decrypted logout response:", json.dumps(err, indent=2))
+        return err
+    if not auth_header.lower().startswith("bearer "):
+        err = {
+            "status": "error",
+            "message": "Invalid or expired token",
+            "errorCode": "TOKEN_INVALID"
+        }
+        print("[SERVER] Decrypted logout response:", json.dumps(err, indent=2))
+        return err
+    access_token = auth_header.split(" ", 1)[1]
+    key_bytes = hashlib.sha256(access_token.encode()).digest()
+
+    # Try to logout
     try:
         auth_service.logout(db, current_user)
-        log_api_entry(db, current_user, client_ip, "/logout", f"user={current_user}", aes_key_bytes, 'S')
+        log_api_entry(db, current_user, client_ip, "/logout", f"user={current_user}", key_bytes, 'S')
+        response_obj = {
+            "status": "success",
+            "message": "Logged out successfully",
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        }
+        return encrypt_response(response_obj, key_bytes)
     except Exception as e:
-        return generic_error(str(e), code="LOGOUT_ERROR", status_code=400)
-    return {"message": "Logout successful"}
+        err = {
+            "status": "error",
+            "message": "Unable to logout at this time",
+            "errorCode": "SERVER_ERROR"
+        }
+        return encrypt_response(err, key_bytes)
 
 
 
@@ -744,7 +870,15 @@ def login(data: dict = Body(...), db: Session = Depends(get_db), request: Reques
                 logger.log_decrypted_response(response_obj, endpoint="login")
                 resp_b64 = base64.b64encode(json.dumps(response_obj, separators=(",", ":")).encode()).decode()
                 logger.log_encrypted_response({"data": resp_b64}, endpoint="login")
-                log_api_entry(db, username, client_ip, "/auth/login", str(data), aes_key_bytes, 'S')
+                # Extract session_id (jti) from JWT
+                session_id = None
+                try:
+                    from app.core.security import decode_token
+                    payload = decode_token(token)
+                    session_id = payload.get("jti")
+                except Exception:
+                    session_id = None
+                log_api_entry(db, username, client_ip, "/auth/login", str(data), aes_key_bytes, 'S', session_id=session_id)
                 return {"data": resp_b64}
         # If login_result is not a dict, treat as error
         return generic_login_error("Invalid login response", code="LOGIN_ERROR", status_code=400)
