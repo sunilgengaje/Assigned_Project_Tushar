@@ -1,3 +1,4 @@
+
 import os
 import hashlib
 import json
@@ -151,4 +152,96 @@ async def create_manageAggregator(request: Request, db: Session = Depends(get_db
             key_bytes if key_bytes else b'0'*32,
             500,
             {"error": str(e), "type": str(type(e)), "traceback": traceback.format_exc()}
+        )
+
+
+
+
+
+# plain text api
+
+@router.post('/manage-aggregator/plain', status_code=status.HTTP_201_CREATED)
+async def create_manageAggregator_plain(request: Request, db: Session = Depends(get_db)):
+    """
+    Create a new aggregator without any encryption on request or response.
+    Accepts a plain JSON body and returns a plain JSON response.
+    """
+    agg_dict = None
+    try:
+        body = await request.json()
+        # Log the plain request body for debugging
+        import sys
+        print("[DEBUG] Plain request body:", body, file=sys.stderr)
+        agg_dict = body
+        password = generate_random_password()
+        hashed_password = hash_password(password)
+        new_agg = ManageAggregator(
+            aggregatorName=agg_dict["aggregatorName"],
+            contactPersonName=agg_dict["contactPersonName"],
+            email=agg_dict["email"],
+            mobileNo=agg_dict["mobileNo"],
+            location=agg_dict["location"],
+            services=agg_dict["services"],
+            status="Created",
+            password=hashed_password,
+            is_logged_in='N',
+            password_history=json.dumps([hashed_password]),
+            failed_login_attempts=0
+        )
+        db.add(new_agg)
+        db.commit()
+        db.refresh(new_agg)
+        return JSONResponse(
+            status_code=201,
+            content={
+                "message": "Aggregator added successfully",
+                "status": "created",
+            
+            }
+        )
+    except IntegrityError as e:
+        db.rollback()
+        import sys
+        print("[DEBUG] IntegrityError:", str(e), file=sys.stderr)
+        print("[DEBUG] IntegrityError repr:", repr(e), file=sys.stderr)
+        if hasattr(e, 'orig'):
+            print("[DEBUG] IntegrityError orig:", repr(e.orig), file=sys.stderr)
+        error_str = str(e)
+        orig_str = str(e.orig) if hasattr(e, 'orig') else ''
+        email_val = agg_dict.get("email") if agg_dict else None
+        if ("Duplicate entry" in error_str or "Duplicate entry" in orig_str or "1062" in error_str or "1062" in orig_str):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "error_code": "DUPLICATE_EMAIL",
+                    "message": "Email already exists. Please use a different email.",
+                    "details": {"error": "Duplicate email", "field": "email", "value": email_val}
+                }
+            )
+        else:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "error_code": "DB_ERROR",
+                    "message": "Database error",
+                    "details": {"error": error_str, "orig": orig_str}
+                }
+            )
+    except Exception as e:
+        db.rollback()
+        import sys, traceback
+        print("[DEBUG] General Exception:", str(e), file=sys.stderr)
+        print("[DEBUG] Exception type:", type(e), file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        print("[DEBUG] agg_dict in exception:", agg_dict, file=sys.stderr)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "error_code": "DB_ERROR",
+                "message": "Database error",
+                "details": {"error": str(e), "type": str(type(e)), "traceback": traceback.format_exc()}
+            }
         )
