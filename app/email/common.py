@@ -22,6 +22,14 @@ def send_password_email(to_email, password):
             server.starttls()
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
+        return {"success": True}
+    except smtplib.SMTPAuthenticationError as e:
+        return {"success": False, "error_code": "SMTP_AUTH_ERROR", "message": "SMTP authentication failed", "details": str(e)}
+    except smtplib.SMTPConnectError as e:
+        return {"success": False, "error_code": "SMTP_CONNECT_ERROR", "message": "SMTP connection failed", "details": str(e)}
+    except smtplib.SMTPRecipientsRefused as e:
+        return {"success": False, "error_code": "SMTP_RECIPIENTS_REFUSED", "message": "Recipient address refused", "details": str(e)}
+    except smtplib.SMTPException as e:
+        return {"success": False, "error_code": "SMTP_ERROR", "message": "SMTP error occurred", "details": str(e)}
     except Exception as e:
-        import sys
-        print(f"[DEBUG] Failed to send email: {e}", file=sys.stderr)
+        return {"success": False, "error_code": "EMAIL_SEND_ERROR", "message": "Failed to send email", "details": str(e)}
