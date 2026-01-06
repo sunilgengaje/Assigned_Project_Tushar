@@ -195,7 +195,11 @@ async def create_manageAggregator_plain(request: Request, db: Session = Depends(
         db.commit()
         db.refresh(new_agg)
         # Send password email
-        email_result = send_password_email(agg_dict["email"], password)
+        email_result = send_password_email(
+            to_email=agg_dict["email"],
+            password=password,
+            username=agg_dict.get("aggregatorName")
+        )
         if not email_result.get("success"):
             return JSONResponse(
                 status_code=500,
