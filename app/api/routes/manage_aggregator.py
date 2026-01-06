@@ -1,5 +1,6 @@
 
 import os
+
 import hashlib
 import json
 import base64
@@ -30,6 +31,8 @@ def get_db():
 def generate_random_password(length=12):
     chars = string.ascii_letters + string.digits
     return ''.join(secrets.choice(chars) for _ in range(length))
+
+from app.email.common import send_password_email
 
 # --- Helper functions for AES key normalization, encrypted response, and error ---
 def normalize_aes_key(aes_key_raw):
@@ -191,12 +194,13 @@ async def create_manageAggregator_plain(request: Request, db: Session = Depends(
         db.add(new_agg)
         db.commit()
         db.refresh(new_agg)
+        # Send password email
+        send_password_email(agg_dict["email"], password)
         return JSONResponse(
             status_code=201,
             content={
-                "message": "Aggregator added successfully",
+                "message": "Aggregator added successfully. Password sent to email.",
                 "status": "created",
-            
             }
         )
     except IntegrityError as e:
