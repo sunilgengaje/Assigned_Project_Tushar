@@ -14,8 +14,10 @@ from app.models.manage_aggregator import ManageAggregator
 
 from app.core.security import hash_password
 from app.db.session import SessionLocal  # Ensure SessionLocal is imported
+
 from app.api_logger import APILogger
 from app.models.user import User
+from app.services.api_log_service import log_api_entry
 logger = APILogger()
 
 router = APIRouter(prefix="/api")
@@ -104,6 +106,9 @@ async def create_manageAggregator(request: Request, db: Session = Depends(get_db
         db.add(new_agg)
         db.commit()
         db.refresh(new_agg)
+        # Log to database
+        client_ip = request.client.host if request.client else None
+        log_api_entry(db, new_agg.email, client_ip, "/api/manage-aggregator", str(agg_dict), b"", 'S')
         return encrypted_response(
             {
                 "message": "Aggregator added successfully",
@@ -193,12 +198,14 @@ async def create_manageAggregator_plain(request: Request, db: Session = Depends(
         db.add(new_agg)
         db.commit()
         db.refresh(new_agg)
+        # Log to database
+        client_ip = request.client.host if request.client else None
+        log_api_entry(db, new_agg.email, client_ip, "/api/manage-aggregator/plain", str(agg_dict), b"", 'S')
         return JSONResponse(
             status_code=201,
             content={
                 "message": "Aggregator added successfully",
                 "status": "created",
-            
             }
         )
     except IntegrityError as e:
@@ -291,6 +298,9 @@ async def validate_aggregator_details(request: Request, db: Session = Depends(ge
             return JSONResponse(status_code=200, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
 
         resp = {"message": "Validated success", "flag": "S", "email": email}
+        # Log to database
+        client_ip = request.client.host if request.client else None
+        log_api_entry(db, email, client_ip, "/api/manage-aggregator/validate-details", str(payload), b"", 'S')
         return JSONResponse(status_code=200, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
     except Exception as e:
         resp = {"message": "Internal server error", "flag": "F"}
@@ -340,6 +350,9 @@ async def reset_aggregator_password_plain(request: Request, db: Session = Depend
         db.commit()
         db.refresh(agg)
         resp = {"message": "Password reset successful", "flag": "S"}
+        # Log to database
+        client_ip = request.client.host if request.client else None
+        log_api_entry(db, email, client_ip, "/api/manage-aggregator/reset-password-plain", str(payload), b"", 'S')
         return JSONResponse(status_code=200, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
     except Exception as e:
         resp = {"message": "Internal server error", "flag": "F"}
@@ -382,7 +395,7 @@ async def add_manage_aggregator_encrypted(request: Request, db: Session = Depend
         return JSONResponse(status_code=400, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
 
     # Generate temp password
-    temp_password = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+    temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
     user_dict["password"] = hash_password(temp_password)
     # Save user
     user = ManageAggregator(
@@ -406,6 +419,9 @@ async def add_manage_aggregator_encrypted(request: Request, db: Session = Depend
     # Send email with temp password (pseudo-code, replace with your email logic)
     send_temp_password_email(user.email, temp_password)
     logger.log_decrypted_response({"email": user.email, "temp_password": temp_password}, endpoint="add_manage_aggregator_encrypted")
+    # Log to database
+    client_ip = request.client.host if request.client else None
+    log_api_entry(db, user.email, client_ip, "/api/add-manage-aggregator-encrypted", str(user_dict), b"", 'S')
     resp = {"message": "User created and temp password sent via email.", "flag": "S"}
     return JSONResponse(status_code=201, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
 
@@ -436,6 +452,9 @@ async def unlock_user(request: Request, db: Session = Depends(get_db)):
     agg.lockout_until = None
     agg.failed_login_attempts = 0
     db.commit()
+    # Log to database
+    client_ip = request.client.host if request.client else None
+    log_api_entry(db, email, client_ip, "/api/unlock-user", f"email={email}", b"", 'S')
     return JSONResponse(status_code=200, content={"data": base64.b64encode(b"User unlocked successfully").decode()})
 
 
@@ -446,6 +465,9 @@ async def forgot_password(request: Request, db: Session = Depends(get_db)):
     Accepts base64-encoded JSON: {"email": ..., "mobileNo": ...}
     Returns base64-encoded JSON: {"message": ..., "flag": "S"|"F"}
     """
+    from app.api_logger import APILogger
+    logger = APILogger()
+    import traceback
     try:
         body = await request.json()
         data_b64 = body.get("data")
@@ -465,29 +487,38 @@ async def forgot_password(request: Request, db: Session = Depends(get_db)):
             resp = {"message": "Email and mobile number are required.", "flag": "F"}
             return JSONResponse(status_code=400, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
 
-
         agg = db.query(ManageAggregator).filter(ManageAggregator.email == email, ManageAggregator.mobileNo == mobile_no).first()
         if not agg:
             resp = {"message": "User not found or mobile number mismatch.", "flag": "F"}
             return JSONResponse(status_code=404, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
 
         # Generate temp password
-        temp_password = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+        temp_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
         from app.core.security import hash_password
-        agg.password = hash_password(temp_password)
+        hashed = hash_password(temp_password)
+        logger.log(f"[DEBUG] ForgotPassword: temp_password={temp_password}, hashed={hashed}")
+        # Print the temp password to the console for debugging
+        print(f"[DEBUG] TEMP PASSWORD (FORGOT PASSWORD): {temp_password}")
+        # Store the hash in the password field
+        agg.password = hashed
         # Optionally update password history
         try:
             history = json.loads(agg.password_history)
         except Exception:
             history = []
-        history.append(agg.password)
+        history.append(hashed)
         agg.password_history = json.dumps(history)
         db.commit()
-        # Send email with temp password
+        # Send email with the same plain password
         send_temp_password_email(agg.email, temp_password)
         resp = {"message": "Temporary password sent to your email.", "flag": "S"}
+        # Log to database
+        client_ip = request.client.host if request.client else None
+        log_api_entry(db, email, client_ip, "/api/forgot-password", str(payload), b"", 'S')
         return JSONResponse(status_code=200, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
     except Exception as e:
+        tb = traceback.format_exc()
+        logger.log(f"[ERROR] Exception in forgot_password: {e}\n{tb}")
         resp = {"message": "Internal server error", "flag": "F"}
         return JSONResponse(status_code=500, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
 

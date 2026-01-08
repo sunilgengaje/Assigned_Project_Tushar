@@ -3,13 +3,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import auth, secure, manage_aggregator
 from app.db.base import Base
 from app.db.session import engine
+
 import os
+import logging
 from dotenv import load_dotenv
 from app.middleware.aes_gcm_middleware import AESGCMMiddleware
-import logging
+
 
 load_dotenv(dotenv_path=".env")
 API_ENV = os.getenv("API_ENV", "DEV").upper()
+
+# Universal error logging configuration
+logging.basicConfig(
+	level=logging.ERROR,
+	format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+	handlers=[
+		logging.FileHandler("error.log"),
+		logging.StreamHandler()
+	]
+)
 
 # Suppress SQLAlchemy engine logs in production
 if API_ENV == "PROD":
@@ -35,7 +47,7 @@ EXEMPT_PATHS = [
 	"/api/unlock-user",
 	"/add-manage-aggregator-encrypted",
 	"/api/add-manage-aggregator-encrypted",
-	"/api/forgot-password"
+	"/api/forgot-password",
 	
 ]
 

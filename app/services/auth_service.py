@@ -53,8 +53,11 @@ class AuthService:
         stored_password = user.password if user else None
         if user:
             try:
+                print(f"[DEBUG] Login: input_password={password}, stored_hash={stored_password}")
                 verify_result = verify_password(password, stored_password)
+                print(f"[DEBUG] Login: verify_result={verify_result}")
             except Exception as e:
+                print(f"[DEBUG] Login: verify_password exception: {e}")
                 verify_result = False
         else:
             verify_result = False
