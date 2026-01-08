@@ -85,6 +85,16 @@ class AESGCMMiddleware:
             body += message.get("body", b"")
             more_body = message.get("more_body", False)
 
+        # Log encrypted request payload in DEV
+        import os
+        from app.api_logger import APILogger
+        if os.getenv("API_ENV", "DEV").upper() == "DEV":
+            logger = APILogger()
+            try:
+                logger.log("[ENCRYPTED REQUEST PAYLOAD]", body)
+            except Exception:
+                pass
+
         if not body:
             decrypted_bytes = b"{}"
         else:

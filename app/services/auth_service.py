@@ -77,8 +77,10 @@ class AuthService:
         db.commit()
         return {"access_token": create_access_token({"sub": user.email})}
 
-    def unlock_user(self, db, username):
-        user = db.query(ManageAggregator).filter(ManageAggregator.email == username).first()
+    def unlock_user(self, db, email=None):
+        if not email:
+            return {"error": "Email is required", "error_code": "EMAIL_REQUIRED"}
+        user = db.query(ManageAggregator).filter(ManageAggregator.email == email).first()
         if not user:
             return {"error": "User not found", "error_code": "USER_NOT_FOUND"}
         user.failed_login_attempts = 0

@@ -1,8 +1,6 @@
 
 
 
-
-
 # ====================
 # Standard Library Imports
 # ====================
@@ -17,6 +15,7 @@ from io import BytesIO
 # Third-Party Imports
 # ====================
 from fastapi import APIRouter, Depends, Request, status, Body, FastAPI
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -38,19 +37,23 @@ from app.schemas.payment_aggregator_update import PaymentAggregatorUpdate
 from app.schemas.user import PasswordReset
 
 
+
 logger = APILogger()
 router = APIRouter(prefix="/api")
 auth_service = AuthService()
 
-# ====================
-# Utility Functions
-# ====================
+# Restore get_db function for dependency injection
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+# ====================
+# Utility Functions
+# ====================
+
 
 
 
@@ -516,35 +519,7 @@ auth_service = AuthService()
 
 
 
-# Place captcha endpoint after router definition and before other endpoints
 
-@router.get(
-    "/captcha",
-    summary="Get captcha image and ID (base64)",
-    tags=["Auth"],
-    response_description="JSON with base64 image and captcha_id."
-)
-def get_captcha():
-    from app.api_logger import APILogger
-    logger = APILogger()
-    import random
-    import string
-    import base64
-    captcha_text = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    captcha_id = str(uuid.uuid4())
-    captcha_store.set(captcha_id, captcha_text)
-    image = ImageCaptcha(width=200, height=70)
-    data = image.generate(captcha_text)
-    img_bytes = BytesIO(data.read())
-    img_b64 = base64.b64encode(img_bytes.getvalue()).decode()
-    response = {"captcha_id": captcha_id, "image_b64": img_b64}
-    logger.log_request_payload({}, endpoint="get_captcha")
-    logger.log_decrypted_response(response, endpoint="get_captcha")
-    return response
-
-
-# POST /captcha: Accepts and returns base64-encoded JSON
-from fastapi import Body
 @router.post(
     "/captcha",
     summary="Get captcha image and ID (base64, base64-encoded JSON)",
@@ -582,18 +557,13 @@ async def get_captcha_base64(data: dict = Body(...)):
     logger.log_encrypted_response({"data": resp_b64}, endpoint="get_captcha_base64")
     return {"data": resp_b64}
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+class UnlockUserRequest(BaseModel):
+    email: str
 
-@router.post("/unlock-user", summary="Unlock user account", description="Manually unlock a user account after lockout. Requires username.")
+@router.post("/unlock-user", summary="Unlock user account", description="Manually unlock a user account after lockout. Requires email.")
 def unlock_user(
-    username: str,
-    db: Session = Depends(get_db),
-    current_user: str = Depends(get_current_user)
+    req: UnlockUserRequest,
+    db: Session = Depends(get_db)
 ):
     import base64
     import json
@@ -610,14 +580,16 @@ def unlock_user(
         err_json = json.dumps(err, separators=(",", ":")).encode()
         err_b64 = base64.b64encode(err_json).decode()
         print("[SERVER] Decrypted error:", err)
-        log_api_entry(db, username, client_ip, "/unlock-user", str(err), aes_key_bytes, 'F')
+        log_api_entry(db, req.email, client_ip, "/unlock-user", str(err), aes_key_bytes, 'F')
         return {"error": err_b64}
+    if not req.email:
+        return generic_error("Email is required.", code="UNLOCK_MISSING_EMAIL", status_code=400)
     try:
-        auth_service.unlock_user(db, username)
-        log_api_entry(db, username, client_ip, "/unlock-user", f"username={username}", aes_key_bytes, 'S')
+        auth_service.unlock_user(db, email=req.email)
+        log_api_entry(db, req.email, client_ip, "/unlock-user", f"email={req.email}", aes_key_bytes, 'S')
     except Exception as e:
         return generic_error(str(e), code="UNLOCK_ERROR", status_code=400)
-    return {"message": f"User '{username}' unlocked successfully."}
+    return {"message": f"User '{req.email}' unlocked successfully."}
 
 
 
@@ -931,3 +903,5 @@ async def reset_password(
     return {"message": "Password reset successful"}
 
 # --- Secure Projections Endpoint (duplicate of secure_projections.py for /auth router) ---
+
+

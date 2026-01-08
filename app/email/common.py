@@ -1,17 +1,20 @@
+
 import os
 import smtplib
 from email.message import EmailMessage
+from dotenv import load_dotenv
+load_dotenv()
 
 def send_password_email(to_email, password, username=None):
-    smtp_host = os.getenv('SMTP_HOST', 'smtp.example.com')
-    smtp_port = int(os.getenv('SMTP_PORT', '587'))
-    smtp_user = os.getenv('SMTP_USER', 'user@example.com')
-    smtp_pass = os.getenv('SMTP_PASS', 'password')
+    smtp_host = os.getenv('SMTP_HOST')
+    smtp_port = int(os.getenv('SMTP_PORT'))
+    smtp_user = os.getenv('SMTP_USER')
+    smtp_pass = os.getenv('SMTP_PASS')
     from_email = os.getenv('FROM_EMAIL', smtp_user)
     subject = 'Your Aggregator Account Password'
     user_info = f"Username: {username}\n" if username else ""
     body = f"""
-    Dear User,\n\nYour aggregator account has been created.\n\n{user_info}Email: {to_email}\nTemporary password: {password}\n\nPlease log in and change your password after first login.\n\nRegards,\nSupport Team
+    Dear User,\n\nYour aggregator account has been created.\n\n Username: {to_email}\nTemporary password: {password}\n\nPlease log in and change your password after first login.\n\nRegards,\nSupport Team
     """
     msg = EmailMessage()
     msg['Subject'] = subject

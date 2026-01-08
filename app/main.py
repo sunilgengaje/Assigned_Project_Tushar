@@ -6,9 +6,14 @@ from app.db.session import engine
 import os
 from dotenv import load_dotenv
 from app.middleware.aes_gcm_middleware import AESGCMMiddleware
+import logging
 
 load_dotenv(dotenv_path=".env")
 API_ENV = os.getenv("API_ENV", "DEV").upper()
+
+# Suppress SQLAlchemy engine logs in production
+if API_ENV == "PROD":
+	logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 Base.metadata.create_all(bind=engine)
 
@@ -20,7 +25,17 @@ from app.api.deps import get_current_user
 from fastapi import Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-EXEMPT_PATHS = ["/api/login", "/api/register", "/api/captcha"]
+EXEMPT_PATHS = [
+	"/api/login",
+	"/api/register",
+	"/api/captcha",
+	"/api/manage-aggregator/plain",
+	"/api/manage-aggregator/validate-details",
+	"/api/manage-aggregator/reset-password-plain",
+	"/api/unlock-user",
+	"/add-manage-aggregator-encrypted",
+	"/api/add-manage-aggregator-encrypted",
+]
 
 def global_auth_dependency(request: Request, credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))):
 	for prefix in EXEMPT_PATHS:

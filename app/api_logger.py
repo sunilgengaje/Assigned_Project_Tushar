@@ -11,6 +11,7 @@ class APILogger:
     """
     def __init__(self):
         self.env = os.getenv("API_ENV", "DEV").upper()
+        # Disable logging in PROD
         self.enabled = self.env in ("DEV", "UAT")
 
     def log(self, *args, **kwargs):
