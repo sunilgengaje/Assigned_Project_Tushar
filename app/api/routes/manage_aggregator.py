@@ -1,4 +1,3 @@
-
 import os
 import hashlib
 import json
@@ -6,17 +5,17 @@ import base64
 import string
 import secrets
 import random
-from datetime import datetime
 from fastapi import APIRouter, Request, Depends, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from app.models.manage_aggregator import ManageAggregator
-from app.models.manage_aggregator_backup import ManageAggregatorBackup
+
 from app.core.security import hash_password
 from app.db.session import SessionLocal  # Ensure SessionLocal is imported
 from app.api_logger import APILogger
+from app.models.user import User
 logger = APILogger()
 
 router = APIRouter(prefix="/api")
@@ -66,7 +65,8 @@ async def create_manageAggregator(request: Request, db: Session = Depends(get_db
     agg_dict = None  # Ensure agg_dict is always defined
     key_bytes = None
     try:
-        import sys, traceback
+        import sys
+        import traceback
         body = await request.json()
         print("[DEBUG] Request body:", body, file=sys.stderr)
         data_b64 = body.get("data")
@@ -142,7 +142,8 @@ async def create_manageAggregator(request: Request, db: Session = Depends(get_db
             )
     except Exception as e:
         db.rollback()
-        import sys, traceback
+        import sys
+        import traceback
         print("[DEBUG] General Exception:", str(e), file=sys.stderr)
         print("[DEBUG] Exception type:", type(e), file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
@@ -232,7 +233,8 @@ async def create_manageAggregator_plain(request: Request, db: Session = Depends(
             )
     except Exception as e:
         db.rollback()
-        import sys, traceback
+        import sys
+        import traceback
         print("[DEBUG] General Exception:", str(e), file=sys.stderr)
         print("[DEBUG] Exception type:", type(e), file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
@@ -417,7 +419,7 @@ def send_temp_password_email(email, temp_password):
     return result
 
 
-from app.models.user import User
+
 
 @router.post('/unlock-user', status_code=200)
 async def unlock_user(request: Request, db: Session = Depends(get_db)):
@@ -425,17 +427,68 @@ async def unlock_user(request: Request, db: Session = Depends(get_db)):
     email = body.get("email")
     if not email:
         return JSONResponse(status_code=400, content={"data": base64.b64encode(b"Email is required").decode()})
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
+    agg = db.query(ManageAggregator).filter(ManageAggregator.email == email).first()
+    if not agg:
         return JSONResponse(status_code=404, content={"data": base64.b64encode(b"User not found").decode()})
-    if not user.lockout_until:
+    if not agg.lockout_until:
         return JSONResponse(status_code=200, content={"data": base64.b64encode(b"User is not locked").decode()})
     # Unlock logic
-    user.lockout_until = None
-    user.failed_login_attempts = 0
+    agg.lockout_until = None
+    agg.failed_login_attempts = 0
     db.commit()
     return JSONResponse(status_code=200, content={"data": base64.b64encode(b"User unlocked successfully").decode()})
 
 
+
+@router.post('/forgot-password', status_code=200)
+async def forgot_password(request: Request, db: Session = Depends(get_db)):
+    """
+    Accepts base64-encoded JSON: {"email": ..., "mobileNo": ...}
+    Returns base64-encoded JSON: {"message": ..., "flag": "S"|"F"}
+    """
+    try:
+        body = await request.json()
+        data_b64 = body.get("data")
+        if not data_b64:
+            resp = {"message": "Missing encoded data", "flag": "F"}
+            return JSONResponse(status_code=400, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
+        try:
+            decoded = base64.b64decode(data_b64).decode()
+            payload = json.loads(decoded)
+        except Exception as e:
+            resp = {"message": f"Base64 decode failed: {e}", "flag": "F"}
+            return JSONResponse(status_code=400, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
+
+        email = payload.get("email")
+        mobile_no = payload.get("mobileNo")
+        if not email or not mobile_no:
+            resp = {"message": "Email and mobile number are required.", "flag": "F"}
+            return JSONResponse(status_code=400, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
+
+
+        agg = db.query(ManageAggregator).filter(ManageAggregator.email == email, ManageAggregator.mobileNo == mobile_no).first()
+        if not agg:
+            resp = {"message": "User not found or mobile number mismatch.", "flag": "F"}
+            return JSONResponse(status_code=404, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
+
+        # Generate temp password
+        temp_password = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+        from app.core.security import hash_password
+        agg.password = hash_password(temp_password)
+        # Optionally update password history
+        try:
+            history = json.loads(agg.password_history)
+        except Exception:
+            history = []
+        history.append(agg.password)
+        agg.password_history = json.dumps(history)
+        db.commit()
+        # Send email with temp password
+        send_temp_password_email(agg.email, temp_password)
+        resp = {"message": "Temporary password sent to your email.", "flag": "S"}
+        return JSONResponse(status_code=200, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
+    except Exception as e:
+        resp = {"message": "Internal server error", "flag": "F"}
+        return JSONResponse(status_code=500, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
 
 

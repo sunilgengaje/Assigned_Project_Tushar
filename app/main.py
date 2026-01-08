@@ -35,6 +35,8 @@ EXEMPT_PATHS = [
 	"/api/unlock-user",
 	"/add-manage-aggregator-encrypted",
 	"/api/add-manage-aggregator-encrypted",
+	"/api/forgot-password"
+	
 ]
 
 def global_auth_dependency(request: Request, credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))):
