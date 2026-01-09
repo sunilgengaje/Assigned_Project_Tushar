@@ -1,11 +1,32 @@
+import os
+API_ENV = os.getenv("API_ENV", "DEV").upper()
+# --- Extra SQLAlchemy log suppression after app setup ---
+import logging
+if API_ENV == "PROD":
+	for logger_name in [
+		"sqlalchemy.engine",
+		"sqlalchemy.pool",
+		"sqlalchemy.dialects",
+		"sqlalchemy.orm",
+		"sqlalchemy",
+	]:
+		l = logging.getLogger(logger_name)
+		l.setLevel(logging.WARNING)
+		l.handlers.clear()
+		l.propagate = False
+# --- SQLAlchemy log suppression: must be first ---
+import logging
+if API_ENV == "PROD":
+	sa_logger = logging.getLogger("sqlalchemy.engine")
+	sa_logger.setLevel(logging.WARNING)
+	sa_logger.handlers.clear()  # Remove any handlers that might print to console
+	sa_logger.propagate = False
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import auth, secure, manage_aggregator
 from app.db.base import Base
 from app.db.session import engine
-
-import os
-import logging
 from dotenv import load_dotenv
 from app.middleware.aes_gcm_middleware import AESGCMMiddleware
 
@@ -13,19 +34,26 @@ from app.middleware.aes_gcm_middleware import AESGCMMiddleware
 load_dotenv(dotenv_path=".env")
 API_ENV = os.getenv("API_ENV", "DEV").upper()
 
-# Universal error logging configuration
-logging.basicConfig(
-	level=logging.ERROR,
-	format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-	handlers=[
-		logging.FileHandler("error.log"),
-		logging.StreamHandler()
-	]
-)
 
-# Suppress SQLAlchemy engine logs in production
+# Universal error logging configuration
 if API_ENV == "PROD":
-	logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+	logging.basicConfig(
+		level=logging.ERROR,
+		format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+		handlers=[
+			logging.FileHandler("error.log")
+		]
+	)
+else:
+	logging.basicConfig(
+		level=logging.ERROR,
+		format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+		handlers=[
+			logging.FileHandler("error.log"),
+			logging.StreamHandler()
+		]
+	)
+
 
 Base.metadata.create_all(bind=engine)
 
@@ -75,12 +103,12 @@ def get_allowed_origins():
 		return []
 
 app.add_middleware(
-	CORSMiddleware,
-	allow_origins=["*"],  # Allow all origins
-	allow_credentials=True,
-	allow_methods=["*"],
-	allow_headers=["*"],
-	expose_headers=["x-captcha-id"],
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["x-captcha-id"],
 )
 
 app.include_router(auth.router)

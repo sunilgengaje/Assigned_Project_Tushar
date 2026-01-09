@@ -1,3 +1,5 @@
+import os
+API_ENV = os.getenv("API_ENV", "DEV").upper()
 
 
 
@@ -98,18 +100,21 @@ def get_payment_aggregator_by_ids(
     ).first()
     if not aggregator:
         err = {"status": "error", "error_code": "NOT_FOUND", "message": "PaymentAggregator not found", "details": {}}
-        logger.log_decrypted_response(err, endpoint="get_payment_aggregator_by_ids")
+        if API_ENV != "PROD":
+            logger.log_decrypted_response(err, endpoint="get_payment_aggregator_by_ids")
         log_api_entry(db, username, client_ip, f"/api/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}", str(err), key_bytes, 'F', session_id=jti)
         return JSONResponse({"error": base64.b64encode(json.dumps(err).encode()).decode()}, status_code=404)
 
     data = {c.name: getattr(aggregator, c.name, None) for c in PaymentAggregatorInDB.__table__.columns}
-    logger.log_decrypted_response(data, endpoint="get_payment_aggregator_by_ids")
+    if API_ENV != "PROD":
+        logger.log_decrypted_response(data, endpoint="get_payment_aggregator_by_ids")
     log_api_entry(db, username, client_ip, f"/api/payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}", str(data), key_bytes, 'S', session_id=jti)
     nonce = os.urandom(12)
     plaintext = json.dumps(data, separators=(',', ':')).encode("utf-8")
     ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
     encrypted_response = {"data": base64.b64encode(nonce + ciphertext).decode()}
-    logger.log_encrypted_response(encrypted_response, endpoint="get_payment_aggregator_by_ids")
+    if API_ENV != "PROD":
+        logger.log_encrypted_response(encrypted_response, endpoint="get_payment_aggregator_by_ids")
     return JSONResponse(content=encrypted_response)
 
 
@@ -437,14 +442,18 @@ async def create_payment_aggregator(
     Bulk create payment aggregators. Request and response are encrypted with per-user AES key derived from access token.
     """
     auth_header = request.headers.get("authorization")
-    print("[DEBUG] Incoming Authorization header:", auth_header)
+    import os
+    if os.getenv("API_ENV", "DEV") != "PROD":
+        print("[DEBUG] Incoming Authorization header:", auth_header)
     client_ip = request.client.host if request and request.client else None
     username = current_user if current_user else None
     if not auth_header or not auth_header.lower().startswith("bearer "):
-        print("[DEBUG] Missing or invalid Authorization header!")
+        if os.getenv("API_ENV", "DEV") != "PROD":
+            print("[DEBUG] Missing or invalid Authorization header!")
         return JSONResponse({"error": "Missing or invalid Authorization header"}, status_code=401)
     access_token = auth_header.split(" ", 1)[1]
-    print("[DEBUG] Extracted access token:", access_token)
+    if os.getenv("API_ENV", "DEV") != "PROD":
+        print("[DEBUG] Extracted access token:", access_token)
     key_bytes = hashlib.sha256(access_token.encode()).digest()
     jti = None
     try:
@@ -579,7 +588,9 @@ def unlock_user(
         }
         err_json = json.dumps(err, separators=(",", ":")).encode()
         err_b64 = base64.b64encode(err_json).decode()
-        print("[SERVER] Decrypted error:", err)
+        import os
+        if os.getenv("API_ENV", "DEV") != "PROD":
+            print("[SERVER] Decrypted error:", err)
         log_api_entry(db, req.email, client_ip, "/unlock-user", str(err), aes_key_bytes, 'F')
         return {"error": err_b64}
     if not req.email:
@@ -625,10 +636,12 @@ def logout(
         nonce = os.urandom(12)
         plaintext = json.dumps(obj, separators=(",", ":")).encode("utf-8")
         # Print the plaintext JSON to the server console before encrypting
-        print("[SERVER] Decrypted logout response:", json.dumps(obj, indent=2))
+        if os.getenv("API_ENV", "DEV") != "PROD":
+            print("[SERVER] Decrypted logout response:", json.dumps(obj, indent=2))
         ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
         encrypted_response = {"data": base64.b64encode(nonce + ciphertext).decode()}
-        print("[SERVER] Encrypted logout response:", json.dumps(encrypted_response, indent=2))
+        if os.getenv("API_ENV", "DEV") != "PROD":
+            print("[SERVER] Encrypted logout response:", json.dumps(encrypted_response, indent=2))
         return encrypted_response
 
     # Extract access token from Authorization header
@@ -641,7 +654,9 @@ def logout(
             "message": "Authorization header is missing",
             "errorCode": "AUTH_HEADER_MISSING"
         }
-        print("[SERVER] Decrypted logout response:", json.dumps(err, indent=2))
+        import os
+        if os.getenv("API_ENV", "DEV") != "PROD":
+            print("[SERVER] Decrypted logout response:", json.dumps(err, indent=2))
         return err
     if not auth_header.lower().startswith("bearer "):
         err = {
@@ -649,7 +664,9 @@ def logout(
             "message": "Invalid or expired token",
             "errorCode": "TOKEN_INVALID"
         }
-        print("[SERVER] Decrypted logout response:", json.dumps(err, indent=2))
+        import os
+        if os.getenv("API_ENV", "DEV") != "PROD":
+            print("[SERVER] Decrypted logout response:", json.dumps(err, indent=2))
         return err
     access_token = auth_header.split(" ", 1)[1]
     key_bytes = hashlib.sha256(access_token.encode()).digest()
@@ -663,14 +680,25 @@ def logout(
             "message": "Logged out successfully",
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         }
-        return encrypt_response(response_obj, key_bytes)
+        from app.api_logger import APILogger
+        logger = APILogger()
+        logger.log_decrypted_response(response_obj, endpoint="logout")
+        # Encrypt response
+        encrypted = encrypt_response(response_obj, key_bytes)
+        logger.log_encrypted_response(encrypted, endpoint="logout")
+        return encrypted
     except Exception as e:
         err = {
             "status": "error",
             "message": "Unable to logout at this time",
             "errorCode": "SERVER_ERROR"
         }
-        return encrypt_response(err, key_bytes)
+        from app.api_logger import APILogger
+        logger = APILogger()
+        logger.log_decrypted_response(err, endpoint="logout")
+        encrypted = encrypt_response(err, key_bytes)
+        logger.log_encrypted_response(encrypted, endpoint="logout")
+        return encrypted
 
 
 
@@ -692,7 +720,9 @@ async def register(request: Request, db: Session = Depends(get_db)):
     if not aes_key_raw:
         log_api_entry(db, username, client_ip, "/register", "", None, 'F')
         err = {"status": "error", "error_code": "MISSING_KEY", "message": "AES_GCM_KEY not set in .env", "details": {}}
-        print("[SERVER] Decrypted error:", err)
+        import os
+        if os.getenv("API_ENV", "DEV") != "PROD":
+            print("[SERVER] Decrypted error:", err)
         return {"error": base64.b64encode(json.dumps(err).encode()).decode()}
     token_bytes = aes_key_raw.encode()
     if len(token_bytes) < 32:

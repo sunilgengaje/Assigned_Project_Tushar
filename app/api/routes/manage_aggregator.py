@@ -1,10 +1,11 @@
 import os
+API_ENV = os.getenv("API_ENV", "DEV").upper()
+import os
 import hashlib
 import json
 import base64
 import string
 import secrets
-import random
 from fastapi import APIRouter, Request, Depends, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -16,7 +17,6 @@ from app.core.security import hash_password
 from app.db.session import SessionLocal  # Ensure SessionLocal is imported
 
 from app.api_logger import APILogger
-from app.models.user import User
 from app.services.api_log_service import log_api_entry
 logger = APILogger()
 
@@ -47,8 +47,9 @@ def encrypted_response(obj, key_bytes, status_code=200):
     plaintext = json.dumps(obj, separators=(",", ":")).encode("utf-8")
     ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
     encrypted = {"data": base64.b64encode(nonce + ciphertext).decode()}
-    logger.log_decrypted_response(obj, endpoint="encrypted_response")
-    logger.log_encrypted_response(encrypted, endpoint="encrypted_response")
+    if API_ENV != "PROD":
+        logger.log_decrypted_response(obj, endpoint="encrypted_response")
+        logger.log_encrypted_response(encrypted, endpoint="encrypted_response")
     return JSONResponse(content=encrypted, status_code=status_code)
 
 def generic_error(message, code, key_bytes, status_code=400, details=None):
@@ -66,11 +67,13 @@ def generic_error(message, code, key_bytes, status_code=400, details=None):
 async def create_manageAggregator(request: Request, db: Session = Depends(get_db)):
     agg_dict = None  # Ensure agg_dict is always defined
     key_bytes = None
+    from app.api_logger import APILogger
+    logger = APILogger()
     try:
         import sys
         import traceback
         body = await request.json()
-        print("[DEBUG] Request body:", body, file=sys.stderr)
+        logger.log_decrypted_request(body, endpoint="manage-aggregator")
         data_b64 = body.get("data")
         # Extract access token from Authorization header
         auth_header = request.headers.get("authorization")
@@ -84,9 +87,8 @@ async def create_manageAggregator(request: Request, db: Session = Depends(get_db
         raw = base64.b64decode(data_b64)
         nonce, ciphertext = raw[:12], raw[12:]
         plaintext = AESGCM(key_bytes).decrypt(nonce, ciphertext, None)
-        print("[DEBUG] Decrypted plaintext:", plaintext, file=sys.stderr)
         agg_dict = json.loads(plaintext.decode())
-        print("[DEBUG] agg_dict:", agg_dict, file=sys.stderr)
+        logger.log_decrypted_response(agg_dict, endpoint="manage-aggregator")
         password = generate_random_password()
         hashed_password = hash_password(password)
         # Store the raw bcrypt hash in the password field (not base64-encoded)
@@ -109,23 +111,25 @@ async def create_manageAggregator(request: Request, db: Session = Depends(get_db
         # Log to database
         client_ip = request.client.host if request.client else None
         log_api_entry(db, new_agg.email, client_ip, "/api/manage-aggregator", str(agg_dict), b"", 'S')
-        return encrypted_response(
-            {
-                "message": "Aggregator added successfully",
-                "status": "created",
-                "data": {"temporary_password": password}
-            },
-            key_bytes,
-            201
-        )
+        response_obj = {
+            "message": "Aggregator added successfully",
+            "status": "created",
+            "data": {"temporary_password": password}
+        }
+        logger.log_decrypted_response(response_obj, endpoint="manage-aggregator")
+        encrypted = encrypted_response(response_obj, key_bytes, 201)
+        logger.log_encrypted_response(encrypted, endpoint="manage-aggregator")
+        return encrypted
     except IntegrityError as e:
         db.rollback()
         # Debug logging for exception details
         import sys
-        print("[DEBUG] IntegrityError:", str(e), file=sys.stderr)
-        print("[DEBUG] IntegrityError repr:", repr(e), file=sys.stderr)
+        if API_ENV != "PROD":
+            print("[DEBUG] IntegrityError:", str(e), file=sys.stderr)
+            print("[DEBUG] IntegrityError repr:", repr(e), file=sys.stderr)
         if hasattr(e, 'orig'):
-            print("[DEBUG] IntegrityError orig:", repr(e.orig), file=sys.stderr)
+            if API_ENV != "PROD":
+                print("[DEBUG] IntegrityError orig:", repr(e.orig), file=sys.stderr)
         error_str = str(e)
         orig_str = str(e.orig) if hasattr(e, 'orig') else ''
         email_val = agg_dict.get("email") if agg_dict else None
@@ -149,10 +153,11 @@ async def create_manageAggregator(request: Request, db: Session = Depends(get_db
         db.rollback()
         import sys
         import traceback
-        print("[DEBUG] General Exception:", str(e), file=sys.stderr)
-        print("[DEBUG] Exception type:", type(e), file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
-        print("[DEBUG] agg_dict in exception:", agg_dict, file=sys.stderr)
+        if API_ENV != "PROD":
+            print("[DEBUG] General Exception:", str(e), file=sys.stderr)
+            print("[DEBUG] Exception type:", type(e), file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+            print("[DEBUG] agg_dict in exception:", agg_dict, file=sys.stderr)
         return generic_error(
             "Database error",
             "DB_ERROR",
@@ -174,11 +179,11 @@ async def create_manageAggregator_plain(request: Request, db: Session = Depends(
     Accepts a plain JSON body and returns a plain JSON response.
     """
     agg_dict = None
+    from app.api_logger import APILogger
+    logger = APILogger()
     try:
         body = await request.json()
-        # Log the plain request body for debugging
-        import sys
-        print("[DEBUG] Plain request body:", body, file=sys.stderr)
+        logger.log_decrypted_request(body, endpoint="manage-aggregator/plain")
         agg_dict = body
         password = generate_random_password()
         hashed_password = hash_password(password)
@@ -201,12 +206,14 @@ async def create_manageAggregator_plain(request: Request, db: Session = Depends(
         # Log to database
         client_ip = request.client.host if request.client else None
         log_api_entry(db, new_agg.email, client_ip, "/api/manage-aggregator/plain", str(agg_dict), b"", 'S')
+        response_obj = {
+            "message": "Aggregator added successfully",
+            "status": "created",
+        }
+        logger.log_decrypted_response(response_obj, endpoint="manage-aggregator/plain")
         return JSONResponse(
             status_code=201,
-            content={
-                "message": "Aggregator added successfully",
-                "status": "created",
-            }
+            content=response_obj
         )
     except IntegrityError as e:
         db.rollback()
@@ -278,7 +285,7 @@ async def validate_aggregator_details(request: Request, db: Session = Depends(ge
         try:
             decoded = base64.b64decode(encoded_data).decode()
             payload = json.loads(decoded)
-        except Exception as e:
+        except Exception:
             return JSONResponse(status_code=400, content={"data": base64.b64encode(json.dumps({"message": "Invalid base64 or JSON", "flag": "F"}).encode()).decode()})
 
         email = payload.get("email")
@@ -302,7 +309,7 @@ async def validate_aggregator_details(request: Request, db: Session = Depends(ge
         client_ip = request.client.host if request.client else None
         log_api_entry(db, email, client_ip, "/api/manage-aggregator/validate-details", str(payload), b"", 'S')
         return JSONResponse(status_code=200, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
-    except Exception as e:
+    except Exception:
         resp = {"message": "Internal server error", "flag": "F"}
         return JSONResponse(status_code=500, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
     
@@ -418,7 +425,8 @@ async def add_manage_aggregator_encrypted(request: Request, db: Session = Depend
     db.refresh(user)
     # Send email with temp password (pseudo-code, replace with your email logic)
     send_temp_password_email(user.email, temp_password)
-    logger.log_decrypted_response({"email": user.email, "temp_password": temp_password}, endpoint="add_manage_aggregator_encrypted")
+    if API_ENV != "PROD":
+        logger.log_decrypted_response({"email": user.email, "temp_password": temp_password}, endpoint="add_manage_aggregator_encrypted")
     # Log to database
     client_ip = request.client.host if request.client else None
     log_api_entry(db, user.email, client_ip, "/api/add-manage-aggregator-encrypted", str(user_dict), b"", 'S')
@@ -431,31 +439,10 @@ def send_temp_password_email(email, temp_password):
     result = send_password_email(email, temp_password)
     if not result.get("success"):
         # Log or handle email sending error as needed
-        print(f"[EMAIL ERROR] Could not send to {email}: {result}")
+        if API_ENV != "PROD":
+            print(f"[EMAIL ERROR] Could not send to {email}: {result}")
     return result
 
-
-
-
-@router.post('/unlock-user', status_code=200)
-async def unlock_user(request: Request, db: Session = Depends(get_db)):
-    body = await request.json()
-    email = body.get("email")
-    if not email:
-        return JSONResponse(status_code=400, content={"data": base64.b64encode(b"Email is required").decode()})
-    agg = db.query(ManageAggregator).filter(ManageAggregator.email == email).first()
-    if not agg:
-        return JSONResponse(status_code=404, content={"data": base64.b64encode(b"User not found").decode()})
-    if not agg.lockout_until:
-        return JSONResponse(status_code=200, content={"data": base64.b64encode(b"User is not locked").decode()})
-    # Unlock logic
-    agg.lockout_until = None
-    agg.failed_login_attempts = 0
-    db.commit()
-    # Log to database
-    client_ip = request.client.host if request.client else None
-    log_api_entry(db, email, client_ip, "/api/unlock-user", f"email={email}", b"", 'S')
-    return JSONResponse(status_code=200, content={"data": base64.b64encode(b"User unlocked successfully").decode()})
 
 
 
@@ -521,5 +508,3 @@ async def forgot_password(request: Request, db: Session = Depends(get_db)):
         logger.log(f"[ERROR] Exception in forgot_password: {e}\n{tb}")
         resp = {"message": "Internal server error", "flag": "F"}
         return JSONResponse(status_code=500, content={"data": base64.b64encode(json.dumps(resp).encode()).decode()})
-
-

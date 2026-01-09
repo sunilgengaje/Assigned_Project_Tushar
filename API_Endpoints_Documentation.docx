@@ -1,0 +1,405 @@
+API Endpoint Documentation
+
+---
+
+1. Endpoint: /manage-aggregator
+Method: POST
+Encryption: Encrypted (AES-GCM + base64)
+
+Request Body (Plain):
+{
+  "aggregatorName": "Test Aggregator",
+  "email": "test@example.com",
+  "isDeleted": false
+}
+
+Request Body (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+Response (Plain):
+{
+  "aggregatorId": 1,
+  "aggregatorName": "Test Aggregator",
+  "email": "test@example.com",
+  "isDeleted": false
+}
+
+Response (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+---
+
+2. Endpoint: /manage-aggregator/plain
+Method: POST
+Encryption: Plain
+Table: manage_aggregator
+
+Request Body (Plain):
+{
+  "aggregatorName": "Test Aggregator",
+  "email": "test@example.com",
+  "isDeleted": false
+}
+
+Response (Plain):
+{
+  "aggregatorId": 1,
+  "aggregatorName": "Test Aggregator",
+  "email": "test@example.com",
+  "isDeleted": false
+}
+
+---
+
+3. Endpoint: /manage-aggregator/validate-details
+Method: POST
+Encryption: Plain (base64)
+Table: manage_aggregator
+
+Request Body (Plain):
+{
+  "data": "<base64-encoded JSON>"
+}
+
+Response (Plain):
+{
+  "data": "<base64-encoded JSON>"
+}
+
+---
+
+4. Endpoint: /manage-aggregator/reset-password-plain
+Method: POST
+Encryption: Plain (base64)
+Table: manage_aggregator
+
+Request Body (Plain):
+{
+  "data": "<base64-encoded JSON>"
+}
+
+Response (Plain):
+{
+  "data": "<base64-encoded JSON>"
+}
+
+---
+
+5. Endpoint: /add-manage-aggregator-encrypted
+Method: POST
+Encryption: Encrypted (base64)
+Table: manage_aggregator
+
+Request Body (Encrypted):
+{
+  "data": "<base64-encoded JSON>"
+}
+
+Response (Encrypted):
+{
+  "data": "<base64-encoded JSON>"
+}
+
+---
+
+6. Endpoint: /unlock-user
+Method: POST
+Encryption: Plain (base64)
+Table: manage_aggregator
+
+Request Body (Plain):
+{
+  "data": "<base64-encoded JSON>"
+}
+
+Response (Plain):
+{
+  "data": "<base64-encoded JSON>"
+}
+
+---
+
+7. Endpoint: /forgot-password
+Method: POST
+Encryption: Plain (base64)
+Table: manage_aggregator
+
+Request Body (Plain):
+{
+  "data": "<base64-encoded JSON>"
+}
+
+Response (Plain):
+{
+  "data": "<base64-encoded JSON>"
+}
+
+---
+
+8. Endpoint: /payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}
+Method: GET
+Encryption: Encrypted
+Table: payment_aggregator
+
+Response (Plain):
+{
+  "aggregatorId": 1,
+  "applicationId": 123,
+  "aggregatorName": "Test Aggregator"
+}
+
+Response (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+---
+
+9. Endpoint: /payment-aggregator/application/{applicationId}/aggregator/{aggregatorId}
+Method: PUT
+Encryption: Encrypted
+Table: payment_aggregator
+
+Request Body (Plain):
+{
+  "aggregatorName": "Test Aggregator Updated"
+}
+
+Request Body (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+Response (Plain):
+{
+  "aggregatorId": 1,
+  "applicationId": 123,
+  "aggregatorName": "Test Aggregator Updated"
+}
+
+Response (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+---
+
+10. Endpoint: /all-payment-aggregator/{aggregatorId}
+Method: GET
+Encryption: Encrypted
+Table: payment_aggregator
+
+Response (Plain):
+[
+  { "aggregatorId": 1, "aggregatorName": "A" },
+  { "aggregatorId": 2, "aggregatorName": "B" }
+]
+
+Response (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+---
+
+11. Endpoint: /applications/{applicationId}/aggregators/{aggregatorId}/projections
+Method: GET
+Encryption: Encrypted
+Table: projection_details
+
+Response (Plain):
+[
+  { "projectionId": 1, "value": 100 },
+  { "projectionId": 2, "value": 200 }
+]
+
+Response (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+---
+
+12. Endpoint: /applications/{applicationId}/aggregators/{aggregatorId}/projections
+Method: POST
+Encryption: Encrypted
+Table: projection_details
+
+Request Body (Plain):
+[
+  { "value": 100 },
+  { "value": 200 }
+]
+
+Request Body (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+Response (Plain):
+[
+  { "projectionId": 1, "value": 100 },
+  { "projectionId": 2, "value": 200 }
+]
+
+Response (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+---
+
+13. Endpoint: /applications/payment-aggregators
+Method: POST
+Encryption: Encrypted
+Table: payment_aggregator
+
+Request Body (Plain):
+[
+  { "aggregatorName": "A" },
+  { "aggregatorName": "B" }
+]
+
+Request Body (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+Response (Plain):
+[
+  { "aggregatorId": 1, "aggregatorName": "A" },
+  { "aggregatorId": 2, "aggregatorName": "B" }
+]
+
+Response (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+---
+
+14. Endpoint: /captcha
+Method: POST
+Encryption: Plain
+Table: N/A
+
+Request Body (Plain):
+{}
+
+Response (Plain):
+{
+  "data": "<base64-encoded JSON>"
+}
+
+---
+
+15. Endpoint: /unlock-user
+Method: POST
+Encryption: Plain
+Table: user
+
+Request Body (Plain):
+{
+  "email": "user@example.com"
+}
+
+Response (Plain):
+{
+  "message": "User unlocked successfully."
+}
+
+---
+
+16. Endpoint: /logout
+Method: POST/GET
+Encryption: Encrypted
+Table: user
+
+Response (Plain):
+{
+  "status": "success",
+  "message": "Logged out successfully"
+}
+
+Response (Encrypted):
+{
+  "data": "<base64-encoded AES-GCM encrypted JSON>"
+}
+
+---
+
+17. Endpoint: /register
+Method: POST
+Encryption: Plain
+Table: user
+
+Request Body (Plain):
+{
+  "username": "newuser",
+  "password": "newpass"
+}
+
+Response (Plain):
+{
+  "message": "Registration successful."
+}
+
+---
+
+18. Endpoint: /login
+Method: POST
+Encryption: Plain
+Table: user
+
+Request Body (Plain):
+{
+  "username": "user",
+  "password": "pass"
+}
+
+Response (Plain):
+{
+  "access_token": "jwt_token",
+  "token_type": "bearer"
+}
+
+---
+
+19. Endpoint: /reset-password
+Method: POST
+Encryption: Plain
+Table: user
+
+Request Body (Plain):
+{
+  "username": "user",
+  "old_password": "oldpass",
+  "new_password": "newpass",
+  "confirm_new_password": "newpass"
+}
+
+Response (Plain):
+{
+  "message": "Password reset successful."
+}
+
+---
+
+20. Endpoint: /hello
+Method: POST
+Encryption: Encrypted (middleware)
+Table: N/A
+
+Request Body (Plain):
+{}
+
+Response (Plain):
+{
+  "message": "Hello, user! This is a secure, encrypted endpoint."
+}
+
+---
