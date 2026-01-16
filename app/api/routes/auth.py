@@ -364,18 +364,84 @@ def get_encrypted_projection_details(applicationId: int, aggregatorId: int, requ
     for p in projections:
         d = {c.name: getattr(p, c.name, None) for c in ProjectionDetailsInDB.__table__.columns}
         projections_data.append(d)
+        print(projections_data,'projections_data')
     logger.log_decrypted_response(projections_data, endpoint="get_encrypted_projection_details")
     log_api_entry(db, username, client_ip, f"/api/applications/{applicationId}/aggregators/{aggregatorId}/projections", str(projections_data), key_bytes, 'S', session_id=jti)
     nonce = os.urandom(12)
     plaintext = json.dumps(projections_data, separators=(",", ":")).encode("utf-8")
     ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
     encrypted_response = {"data": base64.b64encode(nonce + ciphertext).decode()}
+    print(encrypted_response,'projections_data')
     logger.log_encrypted_response(encrypted_response, endpoint="get_encrypted_projection_details")
     return JSONResponse(content=encrypted_response)
 
 
+from typing import List
+from app.schemas.projection_details import ProjectionDetails  # Adjust import if needed
+
 @router.post("/applications/{applicationId}/aggregators/{aggregatorId}/projections", tags=["Projections"], status_code=status.HTTP_201_CREATED)
-def create_encrypted_projection_details(applicationId: int, aggregatorId: int, projectionDetails: list, request: Request, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+def create_encrypted_projection_details(
+    applicationId: int,
+    aggregatorId: int,
+    projectionDetails: List[ProjectionDetails],
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+    request: Request = None
+):
+    # Extract access token from Authorization header
+    auth_header = request.headers.get("authorization") if request else None
+    client_ip = request.client.host if request and request.client else None
+    username = current_user if current_user else None
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        return JSONResponse({"error": "Missing or invalid Authorization header"}, status_code=401)
+    access_token = auth_header.split(" ", 1)[1]
+    key_bytes = hashlib.sha256(access_token.encode()).digest()
+    jti = None
+    try:
+        from app.core.security import decode_token
+        payload = decode_token(access_token)
+        username = payload.get("sub")
+        jti = payload.get("jti")
+    except Exception:
+        username = None
+        jti = None
+
+    # Mark old projections as deleted
+    projectionDetailsOld = db.query(ProjectionDetailsInDB).filter(
+        ~ProjectionDetailsInDB.isDeleted,
+        ProjectionDetailsInDB.applicationId == applicationId,
+        ProjectionDetailsInDB.aggregatorId == aggregatorId
+    ).all()
+    for projectionDetail in projectionDetailsOld:
+        projectionDetail.isDeleted = True
+    db.commit()
+
+    # Add new projections
+    for projectionDetail in projectionDetails:
+        data = projectionDetail.dict()
+        data.pop("id", None)  # Remove id if present
+        new_projectionDetail = ProjectionDetailsInDB(**data)
+        db.add(new_projectionDetail)
+    db.commit()
+
+    # Fetch new projections
+    projectionDetailsNew = db.query(ProjectionDetailsInDB).filter(
+        ~ProjectionDetailsInDB.isDeleted,
+        ProjectionDetailsInDB.applicationId == applicationId,
+        ProjectionDetailsInDB.aggregatorId == aggregatorId
+    ).all()
+    projections_data = []
+    for p in projectionDetailsNew:
+        d = {c.name: getattr(p, c.name, None) for c in ProjectionDetailsInDB.__table__.columns}
+        projections_data.append(d)
+    logger.log_decrypted_response(projections_data, endpoint="create_encrypted_projection_details")
+    log_api_entry(db, username, client_ip, f"/api/applications/{applicationId}/aggregators/{aggregatorId}/projections", str(projections_data), key_bytes, 'S', session_id=jti)
+    nonce = os.urandom(12)
+    plaintext = json.dumps(projections_data, separators=(",", ":")).encode("utf-8")
+    ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
+    encrypted_response = {"data": base64.b64encode(nonce + ciphertext).decode()}
+    logger.log_encrypted_response(encrypted_response, endpoint="create_encrypted_projection_details")
+    return JSONResponse(content=encrypted_response)
     # Extract access token from Authorization header
     auth_header = request.headers.get("authorization")
     client_ip = request.client.host if request and request.client else None
@@ -421,12 +487,14 @@ def create_encrypted_projection_details(applicationId: int, aggregatorId: int, p
         d = {c.name: getattr(p, c.name, None) for c in ProjectionDetailsInDB.__table__.columns}
         projections_data.append(d)
     logger.log_decrypted_response(projections_data, endpoint="create_encrypted_projection_details")
+    print(projections_data,"proj12")
     log_api_entry(db, username, client_ip, f"/api/applications/{applicationId}/aggregators/{aggregatorId}/projections", str(projections_data), key_bytes, 'S', session_id=jti)
     nonce = os.urandom(12)
     plaintext = json.dumps(projections_data, separators=(",", ":")).encode("utf-8")
     ciphertext = AESGCM(key_bytes).encrypt(nonce, plaintext, None)
     encrypted_response = {"data": base64.b64encode(nonce + ciphertext).decode()}
     logger.log_encrypted_response(encrypted_response, endpoint="create_encrypted_projection_details")
+    print(encrypted_response,"proj1")
     return JSONResponse(content=encrypted_response)
 
 
@@ -790,8 +858,9 @@ def login(data: dict = Body(...), db: Session = Depends(get_db), request: Reques
     client_ip = request.client.host if request and request.client else None
     username = None
     aes_key_bytes = None
-    if "data" not in data:
-        error_obj = {"error": "Missing data field"}
+    # Enforce base64-encoded JSON in 'data' field
+    if "data" not in data or not isinstance(data["data"], str):
+        error_obj = {"error": "Request must contain a base64-encoded JSON string in the 'data' field."}
         logger.log_decrypted_response(error_obj, endpoint="login")
         error_b64 = base64.b64encode(json.dumps(error_obj, separators=(",", ":")).encode()).decode()
         logger.log_encrypted_response({"data": error_b64}, endpoint="login")
@@ -800,6 +869,9 @@ def login(data: dict = Body(...), db: Session = Depends(get_db), request: Reques
     try:
         decoded = base64.b64decode(data["data"]).decode()
         user_dict = json.loads(decoded)
+        
+        print(user_dict,"decoded data",data["data"],)
+
         logger.log_decrypted_response(user_dict, endpoint="login")
         username = user_dict.get("username", "")
     except Exception as e:
